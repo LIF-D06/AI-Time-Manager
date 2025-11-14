@@ -5,8 +5,6 @@
   <img src="https://img.shields.io/badge/TypeScript-5.9.3-blue" alt="TypeScript">
   <img src="https://img.shields.io/badge/Vite-7.2.2-green" alt="Vite">
   <img src="https://img.shields.io/badge/Express-4.21.1-lightgrey" alt="Express">
-  <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License">
-</p>
 
 ## 🌟 项目简介 / Project Overview
 
@@ -15,7 +13,7 @@ AI Time Manager 是一个专为西交利物浦大学（XJTLU）学生设计的�
 AI Time Manager is an intelligent time management application specifically designed for Xi'an Jiaotong-Liverpool University (XJTLU) students. It can automatically bind to XJTLU eBridge system, retrieve course schedules and synchronize them to email calendar and MS ToDo, while intelligently reading emails to extract schedule information, achieving fully automated schedule management.
 
 ### 💡 小提示 / Pro Tip
-配合手机自动"日历""邮箱"应用，设置日历自动同步邮箱日历使用体验更佳！
+配合手机自带"日历""邮箱"应用，设置日历自动同步邮箱日历使用体验更佳！
 For optimal experience, pair with your phone's built-in "Calendar" and "Email" apps by enabling automatic calendar synchronization!
 
 ## ✨ 核心功能 / Core Features
@@ -34,7 +32,7 @@ For optimal experience, pair with your phone's built-in "Calendar" and "Email" a
 ### 🔧 其他功能 / Additional Features
 - [待开发] 根据语音指令添加日程 / Add Schedule via Voice Commands
 - [待开发] 屏幕OCR识别添加日程 / Add Schedule via Screen OCR Recognition
-- [开发中] 基于React Native的移动应用 / React Native Mobile Application
+- [开发中] React Native日程管理移动应用 / React Native Mobile Application
 
 
 ## 📦 项目结构 / Project Structure
@@ -69,14 +67,13 @@ AIdeamon/
 ### 环境要求 / Prerequisites
 - **Node.js** >= 18.0.0
 - **npm** >= 8.0.0
-- **Python** >= 3.8 (可选，用于 Python 脚本集成)
+- **Python** >= 3.8 (用于 Python 脚本集成)
 
 ### 安装依赖 / Install Dependencies
 
 ```bash
 # 克隆项目 / Clone the project
-git clone <repository-url>
-cd AIdeamon
+git clone https://github.com/LIF-D06/AI-Time-Manager.git
 
 # 安装依赖 / Install dependencies
 npm install
@@ -208,7 +205,7 @@ CMD ["npm", "run", "server"]
 
 如有问题或建议，请通过以下方式联系：
 
-- **Issues** - [GitHub Issues](https://github.com/Metalxiaoxiao/TimeManager/issues)
+- **Issues** - [GitHub Issues](https://github.com/Metalxiaoxiao/AI-Time-Manager/issues)
 - **Email** - metalxiaoxiao@foxmail.com
 ---
 
