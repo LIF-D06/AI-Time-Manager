@@ -1,0 +1,26 @@
+# 一键配置所有环境变量（请将 YOUR_* 替换为实际值）
+
+# JWT 配置
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "JWT_SECRET=YOUR_JWT_SECRET_KEY_HERE"
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "JWT_EXPIRES_IN=1h"
+
+# Microsoft OAuth 配置
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "MS_CLIENT_ID=YOUR_MICROSOFT_CLIENT_ID"
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "MS_CLIENT_SECRET=YOUR_MICROSOFT_CLIENT_SECRET"
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "MS_AUTHORITY=https://login.microsoftonline.com/common"
+
+# OpenAI 配置
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "OPENAI_API_KEY=YOUR_OPENAI_API_KEY"
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "OPENAI_MODEL=gpt-4o"
+
+# 学术配置
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "ACADEMIC_WEEK_OFFSET=0"
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "ACADEMIC_YEAR_START_MONTH=9"
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "ACADEMIC_YEAR_START_DAY=1"
+
+# Exchange 配置（可选）
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "EXCHANGE_URL=https://mail.xjtlu.edu.cn/EWS/Exchange.asmx"
+az webapp config appsettings set --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg --settings "EXCHANGE_DOMAIN=xjtlu.edu.cn"
+
+# 重启应用以应用更改
+az webapp restart --name ai-time-manager-20251114143550 --resource-group ai-time-manager-rg

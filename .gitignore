@@ -24,3 +24,10 @@ dist-ssr
 *.sw?
 *.db
 *.env
+server/.env.azure
+deploy/AZURE_DEPLOYMENT_GUIDE.md
+deploy/AZURE_TROUBLESHOOTING.md
+deploy/AZURE_DEPLOYMENT_UPDATES.md
+deploy/deployment.zip
+deploy/deploy-to-azure-fixed.sh
+deploy/deploy-to-azure-fixed.ps1

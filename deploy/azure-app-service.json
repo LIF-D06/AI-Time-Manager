@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-08-01/Microsoft.Web.json#/definitions/sites",
+  "apiVersion": "2021-02-01",
+  "type": "Microsoft.Web/sites",
+  "name": "[parameters('webAppName')]",
+  "location": "[parameters('location')]",
+  "dependsOn": [
+    "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]"
+  ],
+  "properties": {
+    "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+    "siteConfig": {
+      "appSettings": [
+        {
+          "name": "WEBSITE_NODE_DEFAULT_VERSION",
+          "value": "18.17.0"
+        },
+        {
+          "name": "WEBSITE_RUN_FROM_PACKAGE",
+          "value": "1"
+        },
+        {
+          "name": "PORT",
+          "value": "8080"
+        }
+      ],
+      "cors": {
+        "allowedOrigins": [
+          "https://ai-time-manager.azurewebsites.net"
+        ],
+        "supportCredentials": true
+      }
+    }
+  }
+}

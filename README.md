@@ -3,8 +3,10 @@
 <p align="center">
   <img src="https://img.shields.io/badge/React-19.2.0-blue" alt="React">
   <img src="https://img.shields.io/badge/TypeScript-5.9.3-blue" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Python-3.11.5-green" alt="Python">
   <img src="https://img.shields.io/badge/Vite-7.2.2-green" alt="Vite">
   <img src="https://img.shields.io/badge/Express-4.21.1-lightgrey" alt="Express">
+
 
 ## 🌟 项目简介 / Project Overview
 

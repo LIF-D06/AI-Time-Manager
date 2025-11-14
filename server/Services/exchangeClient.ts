@@ -332,7 +332,7 @@ export class ExchangeClient {
     }
     
     // 自动处理新邮件
-    private async autoProcessNewEmail(email: IEmail) {
+ public async autoProcessNewEmail(email: IEmail) {
         try {
             logger.exchange(`开始自动处理邮件: ${email.subject}`);
             
@@ -706,10 +706,13 @@ export class ExchangeClient {
 
         // 创建过滤器，仅获取未读邮件
         const searchFilter = new SearchFilter.IsEqualTo(EmailMessageSchema.IsRead, false);
-        
+    
+        return this.getEmails(top, searchFilter);
+    }
+
+    async getEmails(top: number = 10, searchFilter: SearchFilter): Promise<IEmail[]> {
         // 创建视图，限制结果数量
         const view = new ItemView(top);
-
         // 定义要加载的属性（包含正文）
         view.PropertySet = new PropertySet(BasePropertySet.FirstClassProperties, [
             ItemSchema.Subject,
@@ -718,10 +721,9 @@ export class ExchangeClient {
             EmailMessageSchema.IsRead,
             ItemSchema.Body
         ]);
-
         try {
             const findResults = await this.service.FindItems(WellKnownFolderName.Inbox, searchFilter, view);
-            logger.success(`成功获取到 ${findResults.TotalCount} 封未读邮件。`);
+            logger.success(`成功获取到 ${findResults.TotalCount} 封邮件。`);
             
             if (findResults.Items.length === 0) {
                 return [];
@@ -737,7 +739,7 @@ export class ExchangeClient {
             
             return emails;
         } catch (err) {
-            logger.error('获取未读邮件失败: ' + (err instanceof Error ? err.message : err));
+            logger.error('获取邮件失败: ' + (err instanceof Error ? err.message : err));
             // 打印更详细的错误信息
             if (err && typeof err === 'object') {
                 logger.data('详细错误: ' + JSON.stringify(err, Object.getOwnPropertyNames(err), 2));

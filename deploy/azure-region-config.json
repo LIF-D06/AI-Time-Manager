@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-11-14T14:09:48Z",
+  "subscriptionId": "2e86abe3-9c13-4533-b833-fc8259d394fc",
+  "deploymentConfig": {
+    "location": "eastus",
+    "runtime": "NODE:18-lts",
+    "resourceGroup": "ai-time-manager-rg",
+    "sku": "B1",
+    "appServicePlan": "ai-time-manager-plan"
+  },
+  "recommendedRegion": "eastus"
+}

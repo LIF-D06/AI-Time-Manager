@@ -9,9 +9,15 @@ class DatabaseService {
     
     async initialize() {
         try {
+            // 使用 Azure 的临时存储路径或当前目录
+            const dbPath = process.env.WEBSITE_INSTANCE_ID ? 
+                '/home/data/users.db' : './users.db';
+            
+            logger.info(`Initializing database at path: ${dbPath}`);
+            
             // 打开或创建数据库
             this.db = await open({
-                filename: './users.db',
+                filename: dbPath,
                 driver: sqlite3.Database
             });
             
@@ -29,6 +35,8 @@ class DatabaseService {
                     MSbinded BOOLEAN DEFAULT 0,
                     ebridgeBinded BOOLEAN DEFAULT 0,
                     timetableUrl TEXT DEFAULT '',
+                    timetableFetchLevel INTEGER DEFAULT 0,
+                    mailReadingSpan INTEGER DEFAULT 30,
                     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
@@ -48,6 +56,22 @@ class DatabaseService {
             } catch (e) {
                 // 如果字段已存在，忽略错误
                 logger.info('timetableUrl column already exists or error adding it:', (e as Error).message);
+            }
+            
+            // 如果表已存在但缺少timetableFetchLevel字段，则添加该字段
+            try {
+                await this.db.exec(`ALTER TABLE users ADD COLUMN timetableFetchLevel INTEGER DEFAULT 0;`);
+            } catch (e) {
+                // 如果字段已存在，忽略错误
+                logger.info('timetableFetchLevel column already exists or error adding it:', (e as Error).message);
+            }
+            
+            // 如果表已存在但缺少mailReadingSpan字段，则添加该字段
+            try {
+                await this.db.exec(`ALTER TABLE users ADD COLUMN mailReadingSpan INTEGER DEFAULT 30;`);
+            } catch (e) {
+                // 如果字段已存在，忽略错误
+                logger.info('mailReadingSpan column already exists or error adding it:', (e as Error).message);
             }
             
             // 创建任务表
@@ -83,10 +107,10 @@ class DatabaseService {
         
         await this.db.run(
             `INSERT INTO users 
-             (id, email, name, XJTLUaccount, XJTLUPassword, passwordHash, JWTtoken, MStoken, MSbinded, ebridgeBinded, timetableUrl) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, email, name, XJTLUaccount, XJTLUPassword, passwordHash, JWTtoken, MStoken, MSbinded, ebridgeBinded, timetableUrl, timetableFetchLevel, mailReadingSpan) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [user.id, user.email, user.name, user.XJTLUaccount, user.XJTLUPassword, user.passwordHash, 
-             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl]
+             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30]
         );
         
         // 保存用户的任务
@@ -101,10 +125,10 @@ class DatabaseService {
         await this.db.run(
             `UPDATE users 
              SET email = ?, name = ?, XJTLUaccount = ?, XJTLUPassword = ?, passwordHash = ?, 
-                 JWTtoken = ?, MStoken = ?, MSbinded = ?, ebridgeBinded = ?, timetableUrl = ?, updatedAt = CURRENT_TIMESTAMP
+                 JWTtoken = ?, MStoken = ?, MSbinded = ?, ebridgeBinded = ?, timetableUrl = ?, timetableFetchLevel = ?, mailReadingSpan = ?, updatedAt = CURRENT_TIMESTAMP
              WHERE id = ?`,
             [user.email, user.name, user.XJTLUaccount, user.XJTLUPassword, user.passwordHash, 
-             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.id]
+             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30, user.id]
         );
     }
     
@@ -219,6 +243,8 @@ class DatabaseService {
             MSbinded: row.MSbinded === 1,
             ebridgeBinded: row.ebridgeBinded === 1,
             timetableUrl: row.timetableUrl || '',
+            timetableFetchLevel: row.timetableFetchLevel || 0,
+            mailReadingSpan: row.mailReadingSpan ?? 30,
             tasks: tasks,
             emsClient: undefined // 运行时生成，不持久化
         };

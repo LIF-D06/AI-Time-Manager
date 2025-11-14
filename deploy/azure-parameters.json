@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "webAppName": {
+      "value": "ai-time-manager"
+    },
+    "appServicePlanName": {
+      "value": "ai-time-manager-plan"
+    },
+    "location": {
+      "value": "East Asia"
+    },
+    "sku": {
+      "value": "B1"
+    },
+    "skuCode": {
+      "value": "B1"
+    },
+    "workerSize": {
+      "value": "0"
+    },
+    "workerSizeId": {
+      "value": "0"
+    },
+    "numberOfWorkers": {
+      "value": "1"
+    }
+  }
+}

@@ -26,6 +26,7 @@ import { initializeApiRoutes } from './routes/apiRoutes';
 import { Options, PythonShell } from 'python-shell';
 import { ExchangeConfig, TimetableActivity } from './Services/types';
 import { logger } from './Utils/logger.js';
+import { EmailMessageSchema, SearchFilter } from 'ews-javascript-api';
 
 const app = express();
 app.use(express.json());
@@ -48,6 +49,8 @@ export interface Task {
 
 export interface User {
     timetableUrl: string;
+    timetableFetchLevel: number; // 时间表获取级别，用于控制重新获取频率
+    mailReadingSpan: number; // 邮件阅读跨度，控制从收件箱读取的邮件数量，默认为30
     id: string;
     email: string;
     name: string;
@@ -228,6 +231,8 @@ app.post('/register', async (req, res) => {
             MSbinded: false, 
             ebridgeBinded: false, 
             timetableUrl: '',
+            timetableFetchLevel: 0,
+            mailReadingSpan: 30,
             tasks: [{
                 id: uuidv4(),
                 name: '测试任务',
@@ -381,7 +386,7 @@ app.get('/redirect', async (req, res) => {
         // 如果没有提供 JWT 或配对失败，仅返回成功提示（或提供指示下一步的页面）
         res.send('身份认证成功！您已经成功绑定微软To Do。将重新跳转回主页');
         //将用户重定向到主页面
-        res.redirect('http://localhost:5173/');
+        res.redirect(process.env.FRONTEND_URL || "http://localhost:5173/");
     } catch (error) {
         logger.error('Token acquisition error:', error);
         res.status(500).send('Authentication failed');
@@ -488,6 +493,23 @@ setInterval(async () => {
             // 仅在内存中保存客户端实例
             user.emsClient = emailClient;
         }
+
+        if (user.mailReadingSpan > 0 && user.emsClient) {
+            try {
+                logger.info(`Reading email for user ${user.id}, remaining span: ${user.mailReadingSpan}`);
+                // 获取收件箱中的邮件（限制为EMAIL_READ_LIMIT封，按接收时间倒序）
+                const emails = await user.emsClient.getEmails(Number(process.env.EMAIL_READ_LIMIT) || 30 , new SearchFilter.Exists(EmailMessageSchema.Body)); 
+                // 提取最新一封邮件
+                const email = emails[user.mailReadingSpan - 1];
+                // 解析邮件内容
+                await user.emsClient.autoProcessNewEmail(email);
+                user.mailReadingSpan--;
+                await dbService.updateUser(user);
+                logger.info(`Decremented mailReadingSpan for user ${user.id}, new value: ${user.mailReadingSpan}`);
+            } catch (emailError) {
+                logger.error(`Failed to read email for user ${user.id}:`, emailError);
+            }
+        }
         
         for (const task of user.tasks) {
             
@@ -580,6 +602,15 @@ setInterval(async () => {
             }
         }
         if (user.ebridgeBinded && user.timetableUrl) {
+            // 检查是否需要重新获取时间表（仅当环境变量中的timetableFetchLevel大于用户存储的值时才重新获取）
+            const envFetchLevel = parseInt(process.env.timetableFetchLevel || '0');
+            const userFetchLevel = user.timetableFetchLevel || 0;
+            
+            if (envFetchLevel <= userFetchLevel) {
+                logger.info(`Skipping timetable fetch for user ${user.id}: env level (${envFetchLevel}) <= user level (${userFetchLevel})`);
+                return;
+            }
+            
             try {
                 // 从timetableUrl中提取hash值
                 let hashMatch = user.timetableUrl.split('/');
@@ -594,6 +625,12 @@ setInterval(async () => {
                     
                     if (response.status === 200 && Array.isArray(response.data)) {
                         logger.success(`Successfully fetched timetable data for user ${user.id}, found ${response.data.length} activities`);
+                        
+                        // 更新用户的timetableFetchLevel为当前环境变量的值
+                        const envFetchLevel = parseInt(process.env.timetableFetchLevel || '0');
+                        user.timetableFetchLevel = envFetchLevel;
+                        await dbService.updateUser(user);
+                        logger.info(`Updated timetableFetchLevel for user ${user.id} to ${envFetchLevel}`);
                         
                         // 解析周次模式的辅助函数
                         function parseWeekPattern(pattern: string): number[] {

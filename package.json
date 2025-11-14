@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "vite --port 8080 && node server/dist/index.js",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
