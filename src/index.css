@@ -1,0 +1,55 @@
+/* 全局样式重置 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* 确保所有图片是响应式的 */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 移除按钮的默认样式 */
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* 移除输入框的默认样式 */
+input {
+  font: inherit;
+}
+
+/* 确保链接没有下划线 */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* 防止文本选中时的高亮影响UI */
+::selection {
+  background: rgba(102, 126, 234, 0.2);
+}
