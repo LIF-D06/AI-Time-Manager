@@ -1,4 +1,4 @@
-# AI Time Manager - 智能时间管理助手 / Intelligent Time Management Assistant
+# AI Time Manager - 智能时间管理助手
 
 <p align="center">
   <img src="https://img.shields.io/badge/React-19.2.0-blue" alt="React">
@@ -21,7 +21,9 @@ For optimal experience, pair with your phone's built-in "Calendar" and "Email" a
 ### 📧 邮件服务 / Email Services
 - **AI自动邮件阅读并提取日程信息** / AI Automatic Email Reading and Schedule Extraction
 - **自动创建MS Todo任务** / Automatic Creation of MS Todo Course Tasks
+
 - **自动添加邮箱日历事件** / Automatic Addition of Email Calendar Events
+![alt text](image.png)
 - [待开发] 可选的日程邮件自动确认 / Optional Automatic Confirmation of Schedule Emails
 
 ### 🎓 西浦eBridge集成 / XJTLU eBridge Integration
