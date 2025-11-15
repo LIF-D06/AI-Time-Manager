@@ -491,8 +491,9 @@ setInterval(async () => {
                     };
                     try {
                         await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive);
-                        user.tasks.push(newTask);
                         broadcastTaskChange('created', newTask, user.id);
+                        // 增量刷新缓存：合并新创建的事件任务
+                        await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
                     } catch (e:any) {
                         if (e instanceof ScheduleConflictError) {
                             logger.warn(`Skipped conflicting event task ${newTask.id} for user ${user.id}`);
@@ -789,8 +790,8 @@ setInterval(async () => {
                                             // 添加到用户任务列表
                                             try {
                                                 await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive);
-                                                user.tasks.push(newTask);
                                                 broadcastTaskChange('created', newTask, user.id);
+                                                await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
                                                 logger.info(`Added timetable task: ${newTask.name} on ${courseDate.toLocaleDateString()} (Week: ${currentWeekNumber}) for user ${user.id}`);
                                             } catch (e:any) {
                                                 if (e instanceof ScheduleConflictError) {
@@ -823,8 +824,8 @@ setInterval(async () => {
 export async function createTaskToUser(user: User, taskData: Task): Promise<void> {
     // 实现创建任务的逻辑
     try {
-        user.tasks.push(taskData);
         await dbService.addTask(user.id, taskData);
+        await dbService.refreshUserTasksIncremental(user, { addedIds: [taskData.id] });
         logger.success(`Task created successfully for user ${user.id}: ${taskData.name}`);
     } catch (error) {
         logger.error(`Failed to create task for user ${user.id}:`, error);

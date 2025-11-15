@@ -257,6 +257,171 @@ class DatabaseService {
         }));
     }
 
+    // 分页 / 过滤查询：用于高性能列出任务
+    async getTasksPage(userId: string, opts?: {
+        start?: string;
+        end?: string;
+        q?: string;
+        completed?: boolean;
+        limit?: number;
+        offset?: number;
+        sortBy?: string;
+        order?: 'asc' | 'desc';
+    }): Promise<{ tasks: Task[]; total: number }> {
+        if (!this.db) throw new Error('Database not initialized');
+        const where: string[] = ['userId = ?'];
+        const params: any[] = [userId];
+        if (opts?.start) {
+            where.push('endTime >= ?');
+            params.push(opts.start);
+        }
+        if (opts?.end) {
+            where.push('startTime <= ?');
+            params.push(opts.end);
+        }
+        if (typeof opts?.completed === 'boolean') {
+            where.push('completed = ?');
+            params.push(opts.completed ? 1 : 0);
+        }
+        if (opts?.q) {
+            const like = `%${opts.q.toLowerCase()}%`;
+            where.push('(LOWER(name) LIKE ? OR LOWER(description) LIKE ? OR LOWER(location) LIKE ?)');
+            params.push(like, like, like);
+        }
+
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const sortField = ['startTime', 'dueDate', 'name', 'endTime'].includes(opts?.sortBy || '') ? opts!.sortBy : 'startTime';
+        const order = opts?.order === 'desc' ? 'DESC' : 'ASC';
+        const limit = Math.max(1, Math.min(500, opts?.limit || 50));
+        const offset = Math.max(0, opts?.offset || 0);
+
+        // count
+        const countSql = `SELECT COUNT(*) as cnt FROM tasks ${whereSql}`;
+        const countRow: any = await this.db.get(countSql, params);
+        const total = countRow ? (countRow.cnt || 0) : 0;
+
+        // select with ordering and pagination
+        const sql = `SELECT * FROM tasks ${whereSql} ORDER BY ${sortField} ${order} LIMIT ? OFFSET ?`;
+        const finalParams = params.concat([limit, offset]);
+        const rows = await this.db.all(sql, finalParams);
+        const tasks = rows.map((row: any) => ({
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            dueDate: row.dueDate,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            location: row.location,
+            completed: row.completed === 1,
+            pushedToMSTodo: row.pushedToMSTodo === 1,
+            body: row.body,
+            attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
+            recurrenceRule: row.recurrenceRule || undefined,
+            parentTaskId: row.parentTaskId || undefined
+        } as Task));
+
+        return { tasks, total };
+    }
+
+    // 分页获取某根任务的子实例（occurrences）
+    async getOccurrencesPage(userId: string, rootTaskId: string, opts?: { limit?: number; offset?: number; sortBy?: string; order?: 'asc' | 'desc' }): Promise<{ occurrences: Task[]; total: number }> {
+        if (!this.db) throw new Error('Database not initialized');
+        const where: string[] = ['userId = ?', 'parentTaskId = ?'];
+        const params: any[] = [userId, rootTaskId];
+        const whereSql = `WHERE ${where.join(' AND ')}`;
+        const sortField = ['startTime', 'dueDate', 'name', 'endTime'].includes(opts?.sortBy || '') ? opts!.sortBy : 'startTime';
+        const order = opts?.order === 'desc' ? 'DESC' : 'ASC';
+        const limit = Math.max(1, Math.min(500, opts?.limit || 50));
+        const offset = Math.max(0, opts?.offset || 0);
+
+        const countSql = `SELECT COUNT(*) as cnt FROM tasks ${whereSql}`;
+        const countRow: any = await this.db.get(countSql, params);
+        const total = countRow ? (countRow.cnt || 0) : 0;
+
+        const sql = `SELECT * FROM tasks ${whereSql} ORDER BY ${sortField} ${order} LIMIT ? OFFSET ?`;
+        const rows = await this.db.all(sql, params.concat([limit, offset]));
+        const occurrences = rows.map((row: any) => ({
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            dueDate: row.dueDate,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            location: row.location,
+            completed: row.completed === 1,
+            pushedToMSTodo: row.pushedToMSTodo === 1,
+            body: row.body,
+            attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
+            recurrenceRule: row.recurrenceRule || undefined,
+            parentTaskId: row.parentTaskId || undefined
+        } as Task));
+
+        return { occurrences, total };
+    }
+
+    // 刷新内存中的 user.tasks 缓存
+    async refreshUserTasks(user: any): Promise<void> {
+        if (!this.db) throw new Error('Database not initialized');
+        if (!user || !user.id) throw new Error('Invalid user');
+        const tasks = await this.getTasksByUserId(user.id);
+        user.tasks = tasks;
+    }
+
+    // 根据指定的 id 列表获取任务
+    async getTasksByIds(userId: string, ids: string[]): Promise<Task[]> {
+        if (!this.db) throw new Error('Database not initialized');
+        if (!ids || ids.length === 0) return [];
+        const placeholders = ids.map(() => '?').join(',');
+        const sql = `SELECT * FROM tasks WHERE userId = ? AND id IN (${placeholders})`;
+        const rows = await this.db.all(sql, [userId, ...ids]);
+        return rows.map((row: any) => ({
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            dueDate: row.dueDate,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            location: row.location,
+            completed: row.completed === 1,
+            pushedToMSTodo: row.pushedToMSTodo === 1,
+            body: row.body,
+            attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
+            recurrenceRule: row.recurrenceRule || undefined,
+            parentTaskId: row.parentTaskId || undefined
+        } as Task));
+    }
+
+    // 增量刷新用户缓存：仅合并新增/更新并移除已删除
+    async refreshUserTasksIncremental(user: any, opts?: { addedIds?: string[]; updatedIds?: string[]; deletedIds?: string[] }): Promise<void> {
+        if (!this.db) throw new Error('Database not initialized');
+        if (!user || !user.id) throw new Error('Invalid user');
+        user.tasks = user.tasks || [];
+
+        // 处理删除：移除缓存中的 deletedIds
+        if (opts?.deletedIds && opts.deletedIds.length > 0) {
+            const delSet = new Set(opts.deletedIds);
+            user.tasks = (user.tasks || []).filter((t: Task) => !delSet.has(t.id));
+        }
+
+        // 处理新增/更新：从 DB 中拉取这些 id 的最新记录并合并到缓存
+        const fetchIds: string[] = [];
+        if (opts?.addedIds) fetchIds.push(...opts.addedIds);
+        if (opts?.updatedIds) fetchIds.push(...opts.updatedIds);
+        // 去重
+        const uniqueFetchIds = Array.from(new Set(fetchIds));
+        if (uniqueFetchIds.length > 0) {
+            const rows = await this.getTasksByIds(user.id, uniqueFetchIds);
+            for (const r of rows) {
+                const idx = user.tasks.findIndex((t: Task) => t.id === r.id);
+                if (idx >= 0) {
+                    user.tasks[idx] = r;
+                } else {
+                    user.tasks.push(r);
+                }
+            }
+        }
+    }
+
     async getTaskById(id: string): Promise<Task | null> {
         if (!this.db) throw new Error('Database not initialized');
         const row = await this.db.get('SELECT * FROM tasks WHERE id = ?', [id]);

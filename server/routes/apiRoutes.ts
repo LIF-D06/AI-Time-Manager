@@ -5,6 +5,7 @@ import { User, Task } from '../index';
 import { logger } from '../Utils/logger.js';
 import { dbService } from '../Services/dbService';
 import { findConflictingTasks, ScheduleConflictError } from '../Services/scheduleConflict';
+import { generateRecurrenceInstances, buildRecurrenceSummary } from '../Services/recurrence';
 import { broadcastTaskChange } from '../Services/websocket';
 
 // 身份验证中间件引用
@@ -100,16 +101,16 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         }
         throw e;
       }
-      user.tasks.push(task);
       broadcastTaskChange('created', task, user.id);
       let createdChildren = 0, conflictChildren = 0, errorChildren = 0;
+      const createdIds: string[] = [task.id];
       if (recurrenceRule) {
         const generated = generateRecurrenceInstances(task, recurrenceRule);
         for (const inst of generated) {
-          try {
+            try {
             await dbService.addTask(user.id, inst, effectiveBoundary);
-            user.tasks.push(inst);
             createdChildren++;
+            createdIds.push(inst.id);
             broadcastTaskChange('created', inst, user.id);
           } catch (e: any) {
             if (e instanceof ScheduleConflictError) {
@@ -120,6 +121,8 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
           }
         }
       }
+      // 增量刷新缓存：仅合并新建的任务
+      await dbService.refreshUserTasksIncremental(user, { addedIds: createdIds });
       return res.status(201).json({
         task,
         recurrenceSummary: buildRecurrenceSummary(recurrenceRule, createdChildren, conflictChildren, errorChildren)
@@ -189,18 +192,18 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
           pushedToMSTodo: false,
         };
         if (recurrenceRule) task.recurrenceRule = JSON.stringify(recurrenceRule);
-        try {
+          try {
           await dbService.addTask(user.id, task, effectiveBoundary);
-          user.tasks.push(task);
           broadcastTaskChange('created', task, user.id);
           let createdChildren = 0, conflictChildren = 0, errorChildren = 0;
+          const createdIds: string[] = [task.id];
           if (recurrenceRule) {
             const generated = generateRecurrenceInstances(task, recurrenceRule);
             for (const inst of generated) {
               try {
                 await dbService.addTask(user.id, inst, effectiveBoundary);
-                user.tasks.push(inst);
                 createdChildren++;
+                createdIds.push(inst.id);
                 broadcastTaskChange('created', inst, user.id);
               } catch (e: any) {
                 if (e instanceof ScheduleConflictError) {
@@ -214,6 +217,8 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
           } else {
             results.push({ input, status: 'created', task });
           }
+          // 增量刷新缓存：合并新建 id
+          await dbService.refreshUserTasksIncremental(user, { addedIds: createdIds });
           created++;
         } catch (e: any) {
           if (e instanceof ScheduleConflictError) {
@@ -279,13 +284,12 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       try {
         const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
         await dbService.updateTask(updated, effectiveBoundary);
-        // 同步内存缓存
-        const idx = user.tasks.findIndex(t => t.id === taskId);
-        if (idx >= 0) user.tasks[idx] = updated;
         broadcastTaskChange('updated', updated, user.id);
         if (completed === true && !existing.completed) {
           broadcastTaskChange('completed', updated, user.id);
         }
+        // 增量刷新缓存：仅合并被更新的任务
+        await dbService.refreshUserTasksIncremental(user, { updatedIds: [updated.id] });
         return res.status(200).json({ task: updated });
       } catch (e: any) {
         if (e instanceof ScheduleConflictError) {
@@ -305,173 +309,107 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
     }
   });
 
-  // 删除任务
+  // 删除任务（支持级联删除 cascade=true）
   router.delete('/tasks/:id', authenticateToken, async (req: any, res: any) => {
     try {
       const user = req.user as User;
       const taskId = req.params.id;
       const existingIndex = user.tasks.findIndex(t => t.id === taskId);
       if (existingIndex < 0) return res.status(404).json({ error: 'task not found' });
-      const deletedOk = await dbService.deleteTask(taskId);
-      if (deletedOk) {
+      const cascade = (req.query.cascade || 'false').toString().toLowerCase() === 'true';
+      if (!cascade) {
         const deletedTask = user.tasks[existingIndex];
-        user.tasks.splice(existingIndex, 1);
-        broadcastTaskChange('deleted', deletedTask, user.id);
-        return res.status(200).json({ id: taskId, deleted: true });
+        const deletedOk = await dbService.deleteTask(taskId);
+        if (deletedOk) {
+          broadcastTaskChange('deleted', deletedTask, user.id);
+          // 增量刷新缓存：移除已删除 id
+          await dbService.refreshUserTasksIncremental(user, { deletedIds: [taskId] });
+          return res.status(200).json({ id: taskId, deleted: true });
+        }
+        return res.status(500).json({ error: 'Failed to delete task' });
+      } else {
+        // 级联删除：删除根任务和所有 parentTaskId 指向它的子实例
+        const toDeleteIds = new Set<string>();
+        toDeleteIds.add(taskId);
+        // 收集子实例
+        for (const t of user.tasks) {
+          if (t.parentTaskId === taskId) toDeleteIds.add(t.id);
+        }
+        const deletedItems: Task[] = [];
+        let anyFailed = false;
+        for (const id of Array.from(toDeleteIds)) {
+          try {
+            const ok = await dbService.deleteTask(id);
+            if (ok) {
+              const item = user.tasks.find(tt => tt.id === id);
+              if (item) deletedItems.push(item);
+            } else {
+              anyFailed = true;
+            }
+          } catch (e) {
+            anyFailed = true;
+          }
+        }
+        // 广播已删除项
+        for (const del of deletedItems) {
+          broadcastTaskChange('deleted', del, user.id);
+        }
+        if (anyFailed) return res.status(500).json({ error: 'Failed to fully delete cascade tasks' });
+        // 增量刷新缓存：移除已删除的所有 id
+        await dbService.refreshUserTasksIncremental(user, { deletedIds: Array.from(toDeleteIds) });
+        return res.status(200).json({ id: taskId, deleted: true, cascadeDeleted: true, count: toDeleteIds.size });
       }
-      return res.status(500).json({ error: 'Failed to delete task' });
     } catch (error) {
       logger.error('Unexpected error in DELETE /tasks/:id:', error);
       return res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  // 列出任务（支持时间过滤与分页）
+  // 列出任务（支持时间过滤、分页与排序）
+  // 支持 query: start,end,page,limit OR offset, sortBy=(startTime|dueDate|name), order=(asc|desc)
   router.get('/tasks', authenticateToken, async (req: any, res: any) => {
     try {
       const user = req.user as User;
-      const { start, end, limit = '50', offset = '0', q, completed } = req.query;
-      const limNum = Math.max(1, Math.min(200, parseInt(limit as string, 10) || 50));
-      const offNum = Math.max(0, parseInt(offset as string, 10) || 0);
-      let tasks = user.tasks || [];
-      if (start || end) {
-        const startDate = start ? new Date(start as string) : null;
-        const endDate = end ? new Date(end as string) : null;
-        tasks = tasks.filter(t => {
-          if (!t.startTime || !t.endTime) return false;
-          const s = new Date(t.startTime);
-          const e = new Date(t.endTime);
-          if (startDate && e < startDate) return false;
-          if (endDate && s > endDate) return false;
-          return true;
-        });
+      const { start, end, limit = '50', offset, page, q, completed, sortBy, order } = req.query;
+      const limNum = Math.max(1, Math.min(200, parseInt((limit as string) || '50', 10) || 50));
+      let offNum = 0;
+      if (typeof page !== 'undefined') {
+        const pageNum = Math.max(0, parseInt(page as string, 10) || 0);
+        offNum = pageNum * limNum;
+      } else {
+        offNum = Math.max(0, parseInt((offset as string) || '0', 10) || 0);
       }
-      if (typeof completed === 'string') {
-        const want = completed.toLowerCase() === 'true';
-        tasks = tasks.filter(t => t.completed === want);
-      }
-      if (typeof q === 'string' && q.trim().length > 0) {
-        const keyword = q.trim().toLowerCase();
-        tasks = tasks.filter(t => (
-          (t.name && t.name.toLowerCase().includes(keyword)) ||
-          (t.description && t.description.toLowerCase().includes(keyword)) ||
-          (t.location && t.location.toLowerCase().includes(keyword))
-        ));
-      }
-      const total = tasks.length;
-      const paged = tasks.slice(offNum, offNum + limNum);
-      return res.status(200).json({ tasks: paged, total, limit: limNum, offset: offNum });
+
+      const opts: any = { start: start as string | undefined, end: end as string | undefined, q: q as string | undefined, completed: typeof completed === 'string' ? (completed.toLowerCase() === 'true') : undefined, limit: limNum, offset: offNum, sortBy: sortBy as string | undefined, order: (order as any) };
+      const { tasks, total } = await dbService.getTasksPage(user.id, opts);
+      return res.status(200).json({ tasks, total, limit: limNum, offset: offNum, sortBy: opts.sortBy || 'startTime', order: opts.order || 'asc' });
     } catch (error) {
       logger.error('Failed to list tasks:', error);
       return res.status(500).json({ error: 'Failed to list tasks' });
     }
   });
 
-  // ---- 工具函数：生成重复任务实例 ----
-  function generateRecurrenceInstances(root: Task, rule: any): Task[] {
-    const instances: Task[] = [];
-    try {
-      const freq = rule.freq;
-      const interval = rule.interval && rule.interval > 0 ? rule.interval : 1;
-      const count: number | undefined = rule.count;
-      const until: Date | undefined = rule.until ? new Date(rule.until) : undefined;
-      const byDay: string[] | undefined = Array.isArray(rule.byDay) ? rule.byDay : undefined;
-      const start = new Date(root.startTime);
-      const end = new Date(root.endTime);
-      if (isNaN(start.getTime()) || isNaN(end.getTime())) return instances;
-      const maxIterations = count ? count - 1 : 500; // root 已占一次，剩余生成
-      let generated = 0;
-      if (freq === 'daily') {
-        let cursorStart = new Date(start);
-        let cursorEnd = new Date(end);
-        while (generated < maxIterations) {
-          cursorStart.setDate(cursorStart.getDate() + interval);
-          cursorEnd.setDate(cursorEnd.getDate() + interval);
-          if (until && cursorStart > until) break;
-          instances.push(buildInstance(root, cursorStart, cursorEnd));
-          generated++;
-          if (!count && until && cursorStart > until) break;
-          if (!count && !until && generated >= 30) break;
-        }
-      } else if (freq === 'weekly') {
-        const rootDay = start.getDay();
-        const dayMap: Record<string, number> = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
-        const byDayIdx = byDay?.map(d => dayMap[d])?.filter(d => d !== undefined) || [];
-        let weekOffset = 0;
-        while (generated < maxIterations) {
-          const baseWeekStart = new Date(start);
-          baseWeekStart.setDate(start.getDate() + weekOffset * 7 * interval);
-          // 如果没有 byDay 则沿用原逻辑：每周一次同 weekday
-          if (byDayIdx.length === 0) {
-            if (weekOffset > 0) {
-              const cursorStart = new Date(start);
-              cursorStart.setDate(start.getDate() + weekOffset * 7 * interval);
-              const cursorEnd = new Date(end);
-              cursorEnd.setDate(end.getDate() + weekOffset * 7 * interval);
-              if (until && cursorStart > until) break;
-              instances.push(buildInstance(root, cursorStart, cursorEnd));
-              generated++;
-              if (!count && until && cursorStart > until) break;
-              if (!count && !until && generated >= 30) break;
-            }
-          } else {
-            // byDay 模式：对一周内所有指定 day 生成实例
-            for (const targetDay of byDayIdx) {
-              if (generated >= maxIterations) break;
-              // 计算该周的目标日期
-              const dayDiff = targetDay - rootDay;
-              const cursorStart = new Date(baseWeekStart);
-              cursorStart.setDate(baseWeekStart.getDate() + dayDiff);
-              const cursorEnd = new Date(cursorStart);
-              cursorEnd.setHours(end.getHours(), end.getMinutes(), end.getSeconds(), end.getMilliseconds());
-              // root 已经存在，不重复生成 root 自身的日期
-              if (cursorStart.getTime() === start.getTime()) continue;
-              if (until && cursorStart > until) { generated = maxIterations; break; }
-              instances.push(buildInstance(root, cursorStart, cursorEnd));
-              generated++;
-              if (!count && until && cursorStart > until) break;
-              if (!count && !until && generated >= 30) break;
-            }
-          }
-          weekOffset++;
-        }
-      }
-    } catch (_) {
-      return instances;
-    }
-    return instances;
-  }
+  // recurrence helpers moved to server/Services/recurrence.ts
 
-  function buildInstance(root: Task, s: Date, e: Date): Task {
-    return {
-      id: uuidv4(),
-      name: root.name,
-      description: root.description,
-      startTime: s.toISOString(),
-      endTime: e.toISOString(),
-      dueDate: e.toISOString(),
-      location: root.location,
-      completed: false,
-      pushedToMSTodo: false,
-      parentTaskId: root.id
-    };
-  }
-
-  function buildRecurrenceSummary(rule: any, created: number, conflicts: number, errors: number) {
-    if (!rule) return null;
-    return { createdInstances: created, conflictInstances: conflicts, errorInstances: errors, requestedRule: rule };
-  }
-
-  // 获取某任务的所有重复实例
+  // 获取某任务的所有重复实例（支持分页：page & limit，或 offset & limit；支持 sortBy & order）
   router.get('/tasks/:id/occurrences', authenticateToken, async (req: any, res: any) => {
     try {
       const user = req.user as User;
       const rootId = req.params.id;
-      const root = (user.tasks || []).find(t => t.id === rootId);
+      const { limit = '50', offset, page, sortBy = 'startTime', order = 'asc' } = req.query;
+      const limNum = Math.max(1, Math.min(500, parseInt((limit as string) || '50', 10) || 50));
+      let offNum = 0;
+      if (typeof page !== 'undefined') {
+        const pageNum = Math.max(0, parseInt(page as string, 10) || 0);
+        offNum = pageNum * limNum;
+      } else {
+        offNum = Math.max(0, parseInt((offset as string) || '0', 10) || 0);
+      }
+
+      const root = await dbService.getTaskById(rootId);
       if (!root) return res.status(404).json({ error: 'Task not found' });
-      const children = (user.tasks || []).filter(t => t.parentTaskId === root.id);
-      children.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-      return res.status(200).json({ rootTask: root, occurrences: children });
+      const { occurrences, total } = await dbService.getOccurrencesPage(user.id, rootId, { limit: limNum, offset: offNum, sortBy: sortBy as string, order: (order as any) });
+      return res.status(200).json({ rootTask: root, occurrences, total, limit: limNum, offset: offNum, sortBy: sortBy || 'startTime', order: order || 'asc' });
     } catch (e) {
       logger.error('Fetch occurrences failed', e);
       return res.status(500).json({ error: 'Failed to fetch occurrences' });

@@ -10,28 +10,52 @@ let userProvider: (() => Iterable<User>) | null = null;
 const occurrenceNotified = new Set<string>();
 const JWT_SECRET = process.env.JWT_SECRET || '';
 
-interface AuthedSocket extends WebSocket { userId?: string; }
+interface AuthedSocket extends WebSocket { userId?: string; isAlive?: boolean; }
+let heartbeatInterval: NodeJS.Timeout | null = null;
 
 export function initWebSocket(httpServer: any, provider: () => Iterable<User>) {
   userProvider = provider;
   wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   wss.on('connection', (socket: AuthedSocket, req: IncomingMessage) => {
+    // heartbeat init
+    socket.isAlive = true;
+    socket.on && socket.on('pong', () => { socket.isAlive = true; });
+
     const url = new URL(req.url || '', `http://${req.headers.host}`);
     const token = url.searchParams.get('token');
     if (!token) {
-      socket.send(JSON.stringify({ type: 'error', error: 'AUTH_REQUIRED' }));
-      socket.close();
+      try { socket.send(JSON.stringify({ type: 'error', error: 'AUTH_REQUIRED' })); } catch(_){}
+      try { socket.close(); } catch(_){}
       return;
     }
     try {
       const decoded: any = jwt.verify(token, JWT_SECRET);
       socket.userId = decoded.sub;
-      socket.send(JSON.stringify({ type: 'welcome', time: new Date().toISOString(), userId: socket.userId }));
+      try { socket.send(JSON.stringify({ type: 'welcome', time: new Date().toISOString(), userId: socket.userId })); } catch(_){}
     } catch (e) {
-      socket.send(JSON.stringify({ type: 'error', error: 'INVALID_TOKEN' }));
-      socket.close();
+      try { socket.send(JSON.stringify({ type: 'error', error: 'INVALID_TOKEN' })); } catch(_){}
+      try { socket.close(); } catch(_){}
       return;
     }
+  });
+
+  // heartbeat interval
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = setInterval(() => {
+    if (!wss) return;
+    for (const client of wss.clients) {
+      const s = client as AuthedSocket;
+      if (s.isAlive === false) {
+        try { client.terminate(); } catch (_) {}
+        continue;
+      }
+      s.isAlive = false;
+      try { (client as any).ping?.(); } catch (_) {}
+    }
+  }, 30000);
+
+  wss.on('close', () => {
+    if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
   });
   startOccurrenceScan();
   logger.info('WebSocket server with JWT auth initialized at /ws');

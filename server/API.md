@@ -198,20 +198,6 @@ http://localhost:3000/auth?jwt=<paste-jwt-here>
 - 实现 refresh token 的存储与定期刷新逻辑，以保持长期访问微软 API 的能力。
 - 为所有受保护端点添加 JWT 验证中间件，并处理 token 过期、撤销等情形。
 
----
-
-## 下一步建议（认证部分）
-
-- 为 `/me` 添加受保护接口以便客户端查询当前用户和 MStoken 是否已配对。
-- 将内存用户池替换为数据库实现（sqlite/pg/mongo）。
-- 保存并使用 Microsoft refresh_token（如果 MSAL 返回）。
-
-如果需要，我可以继续为你：
-- 在同目录下添加 `AIdeamon/ME.md` 或实现受保护的 `/me` 端点；
-- 把内存池替换为本地文件持久化（快速实现），或迁移到 sqlite；
-- 安装并配置缺失的依赖以及类型声明，并再次运行 `tsc`。
-
----
 
 ---
 
@@ -385,15 +371,3 @@ URL: `ws://<host>/ws?token=<JWT>` 必须携带有效 JWT（`sub` 为用户 ID）
 - 收到 `taskChange.completed` 更新本地完成状态并移除未来提醒。
 - 使用 `taskOccurrence` 触发桌面提醒或计时器。
 - 收到 `taskOccurrenceCanceled` 清理预设提醒。
-
----
-
-## 后续改进建议（任务部分）
-- 统计并返回被冲突跳过的重复实例数量（填充 conflictInstances）。
-- 增加 `/api/tasks/:id/occurrences` 列出生成的所有子实例。
-- 提供分页与排序（startTime desc/asc）。
-- WebSocket 支持心跳与断线重连策略。
-
----
-
-文档结束。
