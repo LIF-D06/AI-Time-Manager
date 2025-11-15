@@ -7,31 +7,42 @@ import { Task } from ".././index";
 export async function createTodoItem(task: Task, token: string): Promise<void> {
     try {
         const msToken = token;
-                const graphEndpoint = `https://graph.microsoft.com/v1.0/me/todo/lists`;
-                const headers = { Authorization: `Bearer ${msToken}`, 'Content-Type': 'application/json' };
-                axios.post(graphEndpoint, {
-                    displayName: task.name
-                }, { headers }).then(() => {
-                    return axios.get(graphEndpoint, { headers });
-                }).then((listsRes) => {
-                    const defaultList = listsRes.data.value.find((l: any) => l.wellknownName === 'defaultList') || listsRes.data.value[0];
-                    if (!defaultList) throw new Error('No list found');
-                    return axios.post(`https://graph.microsoft.com/v1.0/me/todo/lists/${defaultList.id}/tasks`, {
-                        title: task.name,
-                        body: { content: task.description || '', contentType: 'text' },
-                        dueDateTime: { dateTime: task.dueDate, timeZone: 'UTC' },
-                        importance: 'normal',
-                        status: task.completed ? 'completed' : 'notStarted'
-                    }, { headers });
-                }).then((response) => {
-                    return response.data;
-                }).then((response) => {
-                    if (response) {
-                        task.pushedToMSTodo = true;
-                        logger.success(`Pushed task ${task.id} to MS Todo`);
-                    }
-                });
+        const graphEndpoint = `https://graph.microsoft.com/v1.0/me/todo/lists`;
+        const headers = { Authorization: `Bearer ${msToken}`, 'Content-Type': 'application/json' };
+        
+        // 使用 async/await 替代链式调用，更好地处理错误
+        const createListResponse = await axios.post(graphEndpoint, {
+            displayName: task.name
+        }, { headers });
+        
+        const listsRes = await axios.get(graphEndpoint, { headers });
+        const defaultList = listsRes.data.value.find((l: any) => l.wellknownName === 'defaultList') || listsRes.data.value[0];
+        
+        if (!defaultList) throw new Error('No list found');
+        
+        const taskResponse = await axios.post(`https://graph.microsoft.com/v1.0/me/todo/lists/${defaultList.id}/tasks`, {
+            title: task.name,
+            body: { content: task.description || '', contentType: 'text' },
+            dueDateTime: { dateTime: task.dueDate, timeZone: 'UTC' },
+            importance: 'normal',
+            status: task.completed ? 'completed' : 'notStarted'
+        }, { headers });
+        
+        if (taskResponse.data) {
+            task.pushedToMSTodo = true;
+            logger.success(`Pushed task ${task.id} to MS Todo`);
+        }
+        
     } catch (error: any) {
-        logger.error(`创建待办事项失败: ${error.message || '未知错误'}`);
+        if (error.response?.status === 401) {
+            logger.error(`MS Graph API 401 Unauthorized for task ${task.id}: Token may be expired or invalid`);
+        } else if (error.response?.status === 403) {
+            logger.error(`MS Graph API 403 Forbidden for task ${task.id}: Insufficient permissions`);
+        } else if (error.response?.status) {
+            logger.error(`MS Graph API ${error.response.status} error for task ${task.id}:`, error.response.data || error.message);
+        } else {
+            logger.error(`创建待办事项失败: ${error.message || '未知错误'}`);
+        }
+        // 不抛出错误，避免影响主流程
     }
 }

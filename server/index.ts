@@ -1,17 +1,4 @@
-import * as dotenv from 'dotenv';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-// 注意：编译后在dist目录运行，但.env文件在server目录
-const envPath = path.resolve(__dirname, '..', '.env');
-const dotenvResult = dotenv.config({ path: envPath });
 
-if (dotenvResult.error) {
-    logger.error('错误: 无法加载.env文件:', dotenvResult.error.message);
-} else {
-    logger.info('.env文件成功加载');
-}
 
 import * as msal from '@azure/msal-node';
 import express from 'express';
@@ -27,6 +14,22 @@ import { Options, PythonShell } from 'python-shell';
 import { ExchangeConfig, TimetableActivity } from './Services/types';
 import { logger } from './Utils/logger.js';
 import { EmailMessageSchema, SearchFilter } from 'ews-javascript-api';
+
+// 全局错误处理 - 防止服务器崩溃
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    // 不退出进程，只记录错误
+});
+
+process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception:', error);
+    // 对于致命错误，优雅关闭
+    if (error.message?.includes('EADDRINUSE')) {
+        logger.error('Port already in use, exiting...');
+        process.exit(1);
+    }
+    // 其他错误不退出，只记录
+});
 
 const app = express();
 app.use(express.json());
@@ -498,11 +501,13 @@ setInterval(async () => {
             try {
                 logger.info(`Reading email for user ${user.id}, remaining span: ${user.mailReadingSpan}`);
                 // 获取收件箱中的邮件（限制为EMAIL_READ_LIMIT封，按接收时间倒序）
-                const emails = await user.emsClient.getEmails(Number(process.env.EMAIL_READ_LIMIT) || 30 , new SearchFilter.Exists(EmailMessageSchema.Body)); 
+                const emails = await user.emsClient.findEmails(Number(process.env.EMAIL_READ_LIMIT) || 30); 
                 // 提取最新一封邮件
                 const email = emails[user.mailReadingSpan - 1];
+                // 获取邮件完整内容（包括正文）
+                const fullEmail = await user.emsClient.getEmailById(email.id);
                 // 解析邮件内容
-                await user.emsClient.autoProcessNewEmail(email);
+                await user.emsClient.autoProcessNewEmail(fullEmail);
                 user.mailReadingSpan--;
                 await dbService.updateUser(user);
                 logger.info(`Decremented mailReadingSpan for user ${user.id}, new value: ${user.mailReadingSpan}`);
@@ -550,8 +555,21 @@ setInterval(async () => {
                     
                     // 更新数据库中的任务
                     await dbService.updateTask(task);
-                } catch (error) {
-                    logger.error(`Failed to push task ${task.id} to MS Todo:`, error);
+                } catch (error: any) {
+                    if (error.response?.status === 401) {
+                        logger.error(`MS Graph API 401 Unauthorized for task ${task.id}: Token may be expired or invalid`);
+                        // 可以选择清除用户的MS token，让用户重新授权
+                        // user.MStoken = null;
+                        // await dbService.updateUser(user);
+                    } else if (error.response?.status === 403) {
+                        logger.error(`MS Graph API 403 Forbidden for task ${task.id}: Insufficient permissions`);
+                    } else if (error.response?.status) {
+                        logger.error(`MS Graph API ${error.response.status} error for task ${task.id}:`, error.response.data || error.message);
+                    } else {
+                        logger.error(`Failed to push task ${task.id} to MS Todo:`, error.message || error);
+                    }
+                    // 继续处理其他任务，不中断整个流程
+                    continue;
                 }
             }
         }

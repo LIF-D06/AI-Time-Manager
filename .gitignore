@@ -31,3 +31,4 @@ deploy/AZURE_DEPLOYMENT_UPDATES.md
 deploy/deployment.zip
 deploy/deploy-to-azure-fixed.sh
 deploy/deploy-to-azure-fixed.ps1
+src/IFLOW.md

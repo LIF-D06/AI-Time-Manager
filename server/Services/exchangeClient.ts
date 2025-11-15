@@ -535,28 +535,30 @@ export class ExchangeClient {
                 
                 // 清理邮件主题，确保警告邮件内容安全
                 const cleanedSubject = this.cleanHtmlContent(email.subject || '无主题');
-                
+                //重试
+                await this.callDeepSeekAPI(email);
+
                 // 发送警告邮件给用户
-                try {
-                    const warningEmail = new EmailMessage(this.service);
-                    warningEmail.ToRecipients.Add(email.from?.address || '');
-                    warningEmail.Subject = `任务创建失败 - 日期格式错误`;
-                    warningEmail.Body = new MessageBody(
-                        `您好！\n\n` +
-                        `我们检测到您的邮件中包含无效的日期格式，导致无法自动创建任务。\n\n` +
-                        `邮件主题: ${cleanedSubject}\n` +
-                        `检测到的日期: ${deadline}\n\n` +
-                        `请确保在邮件中使用标准的日期时间格式，例如：\n` +
-                        `- 2024-01-15T14:30:00.000Z (ISO 8601格式)\n` +
-                        `- 2024年1月15日 14:30\n` +
-                        `- 2024-01-15 14:30\n\n` +
-                        `感谢您的理解！`
-                    );
-                    await warningEmail.Send();
-                    logger.success(`已发送日期格式警告邮件给用户: ${email.from?.address}`);
-                } catch (error: any) {
-                    logger.error(`发送警告邮件失败: ${error.message || '未知错误'}`);
-                }
+                // try {
+                //     const warningEmail = new EmailMessage(this.service);
+                //     warningEmail.ToRecipients.Add(email.from?.address || '');
+                //     warningEmail.Subject = `任务创建失败 - 日期格式错误`;
+                //     warningEmail.Body = new MessageBody(
+                //         `您好！\n\n` +
+                //         `我们检测到您的邮件中包含无效的日期格式，导致无法自动创建任务。\n\n` +
+                //         `邮件主题: ${cleanedSubject}\n` +
+                //         `检测到的日期: ${deadline}\n\n` +
+                //         `请确保在邮件中使用标准的日期时间格式，例如：\n` +
+                //         `- 2024-01-15T14:30:00.000Z (ISO 8601格式)\n` +
+                //         `- 2024年1月15日 14:30\n` +
+                //         `- 2024-01-15 14:30\n\n` +
+                //         `感谢您的理解！`
+                //     );
+                //     await warningEmail.Send();
+                //     logger.success(`已发送日期格式警告邮件给用户: ${email.from?.address}`);
+                // } catch (error: any) {
+                //     logger.error(`发送警告邮件失败: ${error.message || '未知错误'}`);
+                // }
                 
                 return; // 不创建任务
             }
@@ -707,30 +709,31 @@ export class ExchangeClient {
         // 创建过滤器，仅获取未读邮件
         const searchFilter = new SearchFilter.IsEqualTo(EmailMessageSchema.IsRead, false);
     
-        return this.getEmails(top, searchFilter);
+        return this.findEmails(top, searchFilter);
     }
 
-    async getEmails(top: number = 10, searchFilter: SearchFilter): Promise<IEmail[]> {
+    async findEmails(top: number = 10, searchFilter?: SearchFilter): Promise<IEmail[]> {
         // 创建视图，限制结果数量
         const view = new ItemView(top);
-        // 定义要加载的属性（包含正文）
+        // 定义要加载的属性（不包含正文，因为Body不能在FindItem请求中使用）
         view.PropertySet = new PropertySet(BasePropertySet.FirstClassProperties, [
             ItemSchema.Subject,
             ItemSchema.DateTimeReceived,
             EmailMessageSchema.From,
-            EmailMessageSchema.IsRead,
-            ItemSchema.Body
+            EmailMessageSchema.IsRead
         ]);
         try {
-            const findResults = await this.service.FindItems(WellKnownFolderName.Inbox, searchFilter, view);
+            const findResults = searchFilter 
+                ? await this.service.FindItems(WellKnownFolderName.Inbox, searchFilter, view)
+                : await this.service.FindItems(WellKnownFolderName.Inbox, view);
             logger.success(`成功获取到 ${findResults.TotalCount} 封邮件。`);
             
             if (findResults.Items.length === 0) {
                 return [];
             }
 
-            // 将 EWS item 转换为我们的 IEmail 格式（包含正文）
-            const emails = findResults.Items.map(item => this.parseEmailFromEWS(item as EmailMessage, true));
+            // 将 EWS item 转换为我们的 IEmail 格式（不包含正文，将在需要时单独获取）
+            const emails = findResults.Items.map(item => this.parseEmailFromEWS(item as EmailMessage, false));
             
             // 调试日志：只记录邮件主题信息
             emails.forEach((email, index) => {
