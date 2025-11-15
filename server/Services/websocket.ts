@@ -1,0 +1,119 @@
+import { WebSocketServer } from 'ws';
+import type { WebSocket } from 'ws';
+import { IncomingMessage } from 'http';
+import { Task, User } from '../index';
+import { logger } from '../Utils/logger.js';
+import jwt from 'jsonwebtoken';
+
+let wss: WebSocketServer | null = null;
+let userProvider: (() => Iterable<User>) | null = null;
+const occurrenceNotified = new Set<string>();
+const JWT_SECRET = process.env.JWT_SECRET || '';
+
+interface AuthedSocket extends WebSocket { userId?: string; }
+
+export function initWebSocket(httpServer: any, provider: () => Iterable<User>) {
+  userProvider = provider;
+  wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  wss.on('connection', (socket: AuthedSocket, req: IncomingMessage) => {
+    const url = new URL(req.url || '', `http://${req.headers.host}`);
+    const token = url.searchParams.get('token');
+    if (!token) {
+      socket.send(JSON.stringify({ type: 'error', error: 'AUTH_REQUIRED' }));
+      socket.close();
+      return;
+    }
+    try {
+      const decoded: any = jwt.verify(token, JWT_SECRET);
+      socket.userId = decoded.sub;
+      socket.send(JSON.stringify({ type: 'welcome', time: new Date().toISOString(), userId: socket.userId }));
+    } catch (e) {
+      socket.send(JSON.stringify({ type: 'error', error: 'INVALID_TOKEN' }));
+      socket.close();
+      return;
+    }
+  });
+  startOccurrenceScan();
+  logger.info('WebSocket server with JWT auth initialized at /ws');
+}
+
+export function broadcastTaskChange(action: 'created' | 'updated' | 'deleted' | 'completed', task: Task, userId: string) {
+  if (!wss) return;
+  const payload = JSON.stringify({
+    type: 'taskChange',
+    action,
+    task: {
+      id: task.id,
+      name: task.name,
+      startTime: task.startTime,
+      endTime: task.endTime,
+      completed: task.completed,
+      parentTaskId: task.parentTaskId,
+      recurrenceRule: task.recurrenceRule
+    }
+  });
+  for (const client of wss.clients) {
+    const c = client as AuthedSocket;
+    if (c.userId !== userId) continue;
+    if ((client as any).readyState === 1) {
+      try { client.send(payload); } catch (_) {}
+    }
+  }
+}
+
+function broadcastTaskOccurrence(task: Task, userId: string) {
+  if (!wss) return;
+  const payload = JSON.stringify({
+    type: 'taskOccurrence',
+    taskId: task.id,
+    name: task.name,
+    startTime: task.startTime,
+    endTime: task.endTime
+  });
+  for (const client of wss.clients) {
+    const c = client as AuthedSocket;
+    if (c.userId !== userId) continue;
+    if ((client as any).readyState === 1) {
+      try { client.send(payload); } catch (_) {}
+    }
+  }
+}
+
+function broadcastTaskOccurrenceCanceled(task: Task, userId: string) {
+  if (!wss) return;
+  const payload = JSON.stringify({ type: 'taskOccurrenceCanceled', taskId: task.id, startTime: task.startTime });
+  for (const client of wss.clients) {
+    const c = client as AuthedSocket;
+    if (c.userId !== userId) continue;
+    if ((client as any).readyState === 1) {
+      try { client.send(payload); } catch (_) {}
+    }
+  }
+}
+
+function startOccurrenceScan() {
+  setInterval(() => {
+    if (!userProvider) return;
+    const now = Date.now();
+    for (const user of userProvider()) {
+      for (const task of user.tasks || []) {
+        if (!task.startTime) continue;
+        const startMillis = new Date(task.startTime).getTime();
+        if (isNaN(startMillis)) continue;
+        if (task.completed && !occurrenceNotified.has(task.id)) {
+          // 已完成且未开始 -> 取消事件
+          if (startMillis > now) {
+            occurrenceNotified.add(task.id);
+            broadcastTaskOccurrenceCanceled(task, user.id);
+          }
+          continue;
+        }
+        if (startMillis <= now && !task.completed && !occurrenceNotified.has(task.id)) {
+          occurrenceNotified.add(task.id);
+          broadcastTaskOccurrence(task, user.id);
+          logger.info(`Broadcast task occurrence ${task.id}`);
+        }
+      }
+    }
+  }, 5000);
+}

@@ -12,6 +12,8 @@ import moment from 'moment';
 import { initializeApiRoutes } from './routes/apiRoutes';
 import { Options, PythonShell } from 'python-shell';
 import { ExchangeConfig, TimetableActivity } from './Services/types';
+import { ScheduleConflictError } from './Services/scheduleConflict';
+import { initWebSocket, broadcastTaskChange } from './Services/websocket';
 import { logger } from './Utils/logger.js';
 import { EmailMessageSchema, SearchFilter } from 'ews-javascript-api';
 
@@ -48,6 +50,8 @@ export interface Task {
     pushedToMSTodo: boolean; // 是否已推送至 Microsoft Todo
     body?: string; // fit IEvent.body
     attendees?: string[]; // fit IEvent.attendees
+    recurrenceRule?: string; // JSON字符串，包含 {freq:'daily'|'weekly', interval?:number, count?:number, until?:ISO}
+    parentTaskId?: string; // 若为重复任务生成的子实例，则指向源任务
 }
 
 export interface User {
@@ -66,6 +70,7 @@ export interface User {
     ebridgeBinded: boolean; // 是否绑定了 ebridge 账号
     tasks: Task[]; // 用户绑定的任务列表
     emsClient?: ExchangeClient; // 用于操作 Exchange 的客户端
+    conflictBoundaryInclusive?: boolean; // 端点相接是否算冲突（true=算）
 }
 
 
@@ -236,6 +241,7 @@ app.post('/register', async (req, res) => {
             timetableUrl: '',
             timetableFetchLevel: 0,
             mailReadingSpan: 30,
+            conflictBoundaryInclusive: false,
             tasks: [{
                 id: uuidv4(),
                 name: '测试任务',
@@ -412,11 +418,12 @@ async function startServer() {
         
         logger.info(`Loaded ${users.length} users from database`);
         
-        // 启动服务器
-        app.listen(PORT, () => {
+        // 启动服务器并初始化 WebSocket
+        const server = app.listen(PORT, () => {
             logger.info(`Server running on http://localhost:${PORT}`);
             logger.info(`Visit http://localhost:${PORT}/auth to start authentication`);
         });
+        initWebSocket(server, () => userCache.values());
     } catch (error) {
         logger.error('Failed to start server:', error);
         process.exit(1);
@@ -467,26 +474,31 @@ setInterval(async () => {
                 
                 // 检查并添加新事件
                 for (const event of events) {
-                    // 检查是否已存在该事件
                     const existingTask = user.tasks.find(task => task.id === event.id);
-                    if (!existingTask) {
-                        const newTask = {
-                            id: event.id || uuidv4(),
-                            name: event.subject,
-                            startTime: event.start,
-                            endTime: event.end,
-                            location: event.location || '',
-                            body: event.body || '',
-                            attendees: event.attendees || [],
-                            description: event.body || '',
-                            dueDate: event.end,
-                            completed: false,
-                            pushedToMSTodo: false,
-                        };
-                        
+                    if (existingTask) continue;
+                    const newTask = {
+                        id: event.id || uuidv4(),
+                        name: event.subject,
+                        startTime: event.start,
+                        endTime: event.end,
+                        location: event.location || '',
+                        body: event.body || '',
+                        attendees: event.attendees || [],
+                        description: event.body || '',
+                        dueDate: event.end,
+                        completed: false,
+                        pushedToMSTodo: false,
+                    };
+                    try {
+                        await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive);
                         user.tasks.push(newTask);
-                        // 保存到数据库
-                        await dbService.addTask(user.id, newTask);
+                        broadcastTaskChange('created', newTask, user.id);
+                    } catch (e:any) {
+                        if (e instanceof ScheduleConflictError) {
+                            logger.warn(`Skipped conflicting event task ${newTask.id} for user ${user.id}`);
+                        } else {
+                            logger.error(`Failed to persist event task ${newTask.id} for user ${user.id}:`, e);
+                        }
                     }
                 }
             } catch (error) {
@@ -775,11 +787,18 @@ setInterval(async () => {
                                             };
                                             
                                             // 添加到用户任务列表
-                                            user.tasks.push(newTask);
-                                            // 保存到数据库
-                                            await dbService.addTask(user.id, newTask);
-                                            
-                                            logger.info(`Added timetable task: ${newTask.name} on ${courseDate.toLocaleDateString()} (Week: ${currentWeekNumber}) for user ${user.id}`);
+                                            try {
+                                                await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive);
+                                                user.tasks.push(newTask);
+                                                broadcastTaskChange('created', newTask, user.id);
+                                                logger.info(`Added timetable task: ${newTask.name} on ${courseDate.toLocaleDateString()} (Week: ${currentWeekNumber}) for user ${user.id}`);
+                                            } catch (e:any) {
+                                                if (e instanceof ScheduleConflictError) {
+                                                    logger.warn(`Skipped conflicting timetable task ${newTask.id} for user ${user.id}`);
+                                                } else {
+                                                    logger.error(`Failed to add timetable task ${newTask.id} for user ${user.id}:`, e);
+                                                }
+                                            }
                                         }
                                     }
                                 }

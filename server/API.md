@@ -1,14 +1,16 @@
 # AIdeamon 接口文档
 
-本文档描述 `AIdeamon/index.ts` 中实现的认证/登录相关 HTTP 接口、数据格式、示例、以及如何把应用端的 JWT 与微软 OAuth 返回的 access token 配对。
+本文档描述后端认证/登录、任务管理、冲突检测、重复任务、批量创建、Boundary 模式配置以及 WebSocket 实时事件接口。所有任务相关端点均位于前缀 `/api` 下（见 `server/routes/apiRoutes.ts`）。
 
 ## 概览
 
 主要目的：
-- 提供本地账号注册/登录（使用 email + password），并使用 JWT 维护会话。
-- 在发起 Microsoft OAuth 授权时把本端 JWT 传给微软（放在 OAuth `state` 中），在微软回调 `/redirect` 时解码并将微软 access token 与全局内存用户池中的用户配对。
+- 提供本地账号注册/登录（email + password），使用 JWT 维护会话。
+- 支持 Microsoft OAuth 并将微软 access token 与本地用户配对。
+- 任务 CRUD、冲突检测（含可配置端点相接是否冲突）、重复任务（Daily / Weekly + byDay）、批量创建与部分成功反馈。
+- WebSocket 经 JWT 鉴权实现用户隔离的任务变更与时间到达事件推送。
 
-注意：当前实现是演示用，用户和令牌均保存在内存（进程重启后丢失）。生产需持久化并保护密钥。
+当前实现已使用 SQLite 持久化用户与任务（见 `dbService.ts`），不再仅依赖内存；内存缓存用于加速访问。生产仍应做好备份与密钥管理。
 
 ---
 
@@ -56,7 +58,7 @@ JWT 有效期：1 小时（`1h`），由 `JWT_EXPIRES_IN` 配置。
 
 ---
 
-## 端点说明
+## 认证端点说明
 
 ### POST /register
 
@@ -175,7 +177,7 @@ http://localhost:3000/auth?jwt=<paste-jwt-here>
 
 ---
 
-## 常见问题与排查
+## 常见问题与排查（认证部分）
 
 - Q：为什么 `/redirect` 没有配对成功？
   - A：请确认在发起 `/auth` 请求时确实把 JWT 通过 `jwt` query 或 Authorization header 传给后端。检查回调 URL 是否包含 `state` 参数，以及 `state` 是否是 base64 编码的 JWT。
@@ -188,7 +190,7 @@ http://localhost:3000/auth?jwt=<paste-jwt-here>
 
 ---
 
-## 安全和生产建议
+## 安全和生产建议（认证部分）
 
 - 不要把 `clientSecret` 和其他秘密写在源代码里，使用环境变量或 secret manager。
 - 将用户、passwordHash、refresh token、access token 等持久化到安全数据库，不要用内存存储。
@@ -198,7 +200,7 @@ http://localhost:3000/auth?jwt=<paste-jwt-here>
 
 ---
 
-## 下一步建议
+## 下一步建议（认证部分）
 
 - 为 `/me` 添加受保护接口以便客户端查询当前用户和 MStoken 是否已配对。
 - 将内存用户池替换为数据库实现（sqlite/pg/mongo）。
@@ -208,6 +210,189 @@ http://localhost:3000/auth?jwt=<paste-jwt-here>
 - 在同目录下添加 `AIdeamon/ME.md` 或实现受保护的 `/me` 端点；
 - 把内存池替换为本地文件持久化（快速实现），或迁移到 sqlite；
 - 安装并配置缺失的依赖以及类型声明，并再次运行 `tsc`。
+
+---
+
+---
+
+## 任务管理 API（需 Authorization: Bearer <JWT>）
+
+所有以下端点路径均以 `/api` 为前缀。例如创建任务：`POST /api/tasks`。
+
+### 数据结构（核心）
+Task:
+```
+{
+  id: string,
+  name: string,
+  description: string,
+  startTime: ISOString,
+  endTime: ISOString,
+  dueDate: ISOString,
+  location?: string,
+  completed: boolean,
+  pushedToMSTodo: boolean,
+  recurrenceRule?: string (JSON 序列化),
+  parentTaskId?: string
+}
+```
+
+RecurrenceRule（反序列化后结构）:
+```
+{
+  freq: 'daily' | 'weekly',
+  interval?: number,
+  count?: number,
+  until?: ISOString,
+  byDay?: string[] // 仅当 freq=weekly 时可用，如 ['Mon','Wed','Fri']
+}
+```
+
+RecurrenceSummary（创建/批量创建响应中）:
+```
+{
+  createdInstances: number,        // 成功持久化的子实例数量
+  conflictInstances: number,       // 因时间冲突被跳过的实例数量
+  errorInstances: number,          // 其它错误导致未创建的实例数量
+  requestedRule: RecurrenceRule
+}
+```
+
+### POST /api/tasks
+创建单个任务（支持冲突检测与重复规则）。
+请求体示例：
+```
+{
+  "name": "Study",
+  "description": "Read chapters",
+  "startTime": "2025-11-16T09:00:00Z",
+  "endTime": "2025-11-16T10:00:00Z",
+  "boundaryConflict": true, // 可选，覆盖用户级配置
+  "recurrenceRule": {
+    "freq": "weekly",
+    "interval": 1,
+    "byDay": ["Mon","Wed"],
+    "count": 6
+  }
+}
+```
+成功响应：201
+```
+{
+  "task": { ...根任务... },
+  "recurrenceSummary": { createdInstances: 4, conflictInstances: 0, errorInstances: 0, requestedRule: {...} }
+}
+```
+冲突：409（ScheduleConflictError）
+```
+{
+  "error": "Task time conflicts",
+  "conflicts": [ { id, name, startTime, endTime }, ... ]
+}
+```
+
+### POST /api/tasks/conflicts
+预检查冲突不创建：
+```
+{
+  "name":"Tmp",
+  "startTime":"...",
+  "endTime":"...",
+  "boundaryConflict": false
+}
+```
+响应：200 `{ conflicts: Task[] }`（可为空数组）。
+
+### POST /api/tasks/batch
+批量创建，部分成功：
+```
+{
+  "tasks": [ { name, startTime, endTime, recurrenceRule? }, ... ],
+  "boundaryConflict": false // 批次默认，可被单条覆盖
+}
+```
+响应：200
+```
+{
+  "results": [
+    { input: {...}, status: "created", task: {...}, recurrenceSummary? },
+    { input: {...}, status: "conflict", conflictList: [ ... ] },
+    { input: {...}, status: "error", errorMessage: "..." }
+  ],
+  "summary": { total, created, conflicts, errors }
+}
+```
+
+### PUT /api/tasks/:id
+更新任务（含冲突检测）。若设置 `completed: true` 且先前为 false，将广播 `completed` 事件。
+
+### DELETE /api/tasks/:id
+删除任务并广播 `deleted`。
+
+### GET /api/tasks
+查询与过滤：支持 `q`（名称/描述模糊），`completed`（true|false），`startAfter`, `endBefore`。返回用户全部匹配任务。
+
+### POST /api/settings/conflict-mode
+设置端点相接是否视为冲突：
+```
+{ "inclusive": true }
+```
+影响后续创建/更新的判定逻辑（闭区间 vs 半开区间）。
+
+---
+
+## 冲突检测逻辑简介
+使用 `scheduleConflict.ts`：两个时间段是否冲突取决于配置：
+- 半开区间（默认）：`A.end <= B.start` 不冲突。
+- 闭区间（inclusive=true）：`A.end == B.start` 视为冲突。
+添加/更新在 DB 层调用 `assertNoConflict` 保证一致性。
+
+---
+
+## 重复任务逻辑
+根任务保存 `recurrenceRule`（JSON 字符串）。生成实例：
+- daily: 每 interval 天一次。
+- weekly: 若提供 byDay 数组按星期生成（Sun,Mon,Tue,Wed,Thu,Fri,Sat 简写），否则沿用根任务星期。
+- 限制：未指定 count/until 时最多生成 30 个实例。
+- 子实例保存 `parentTaskId` 指向根任务，不再包含 recurrenceRule。
+ - 冲突与其它错误分别计入 `conflictInstances` 与 `errorInstances`。
+### GET /api/tasks/:id/occurrences
+返回指定任务（根任务）及其所有重复子实例（按开始时间升序）。若任务不存在返回 404。
+响应示例：
+```
+{
+  "rootTask": { id, name, startTime, ... },
+  "occurrences": [ { id, parentTaskId, startTime, endTime, ... }, ... ]
+}
+```
+
+---
+
+## WebSocket 说明
+URL: `ws://<host>/ws?token=<JWT>` 必须携带有效 JWT（`sub` 为用户 ID）。
+服务器按用户隔离广播。
+
+事件：
+1. `taskChange`: `{ type:'taskChange', action:'created'|'updated'|'deleted'|'completed', task:{ id,name,startTime,endTime,completed,parentTaskId,recurrenceRule? } }`
+2. `taskOccurrence`: 任务首次到达开始时间广播一次。
+   `{ type:'taskOccurrence', taskId, name, startTime, endTime }`
+3. `taskOccurrenceCanceled`: 任务在开始前被标记完成后广播一次。
+   `{ type:'taskOccurrenceCanceled', taskId, startTime }`
+4. `error`: 认证失败等 `{ type:'error', error:'AUTH_REQUIRED'|'INVALID_TOKEN' }`
+5. `welcome`: 连接成功 `{ type:'welcome', time, userId }`
+
+客户端策略建议：
+- 收到 `taskChange.completed` 更新本地完成状态并移除未来提醒。
+- 使用 `taskOccurrence` 触发桌面提醒或计时器。
+- 收到 `taskOccurrenceCanceled` 清理预设提醒。
+
+---
+
+## 后续改进建议（任务部分）
+- 统计并返回被冲突跳过的重复实例数量（填充 conflictInstances）。
+- 增加 `/api/tasks/:id/occurrences` 列出生成的所有子实例。
+- 提供分页与排序（startTime desc/asc）。
+- WebSocket 支持心跳与断线重连策略。
 
 ---
 

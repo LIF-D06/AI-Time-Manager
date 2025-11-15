@@ -145,6 +145,176 @@ npm run preview
 - JWT 令牌管理 / JWT Token Management
 - 错误处理说明 / Error Handling
 
+## 🗓️ 日程与冲突检测 API / Scheduling & Conflict Detection APIs
+
+以下端点均需 `Authorization: Bearer <JWT>`：
+
+1. 创建任务 `POST /api/tasks`
+  - 必填：`name,startTime,endTime`
+  - 可选：`description,dueDate,location,boundaryConflict`
+  - 成功：`201 { task }`
+  - 冲突：`409 { error:'conflict', message, candidate, conflicts:[...] }`
+
+2. 批量创建 `POST /api/tasks/batch`
+  - 请求：`{ tasks:[{...}], boundaryConflict? }`
+  - 响应：`{ results:[{ status, task|conflictList|errorMessage }], summary:{ total, created, conflicts, errors } }`
+
+3. 冲突预检 `POST /api/tasks/conflicts`
+  - 请求：`{ startTime, endTime, boundaryConflict? }`
+  - 响应：`{ conflicts:[ { id,name,startTime,endTime }, ... ] }`
+
+4. 更新任务 `PUT /api/tasks/:id`
+  - 支持部分字段；时间变更触发冲突则 `409`。
+
+5. 删除任务 `DELETE /api/tasks/:id`
+  - 响应：`{ id, deleted: true }`
+
+6. 列出任务 `GET /api/tasks?start=&end=&limit=&offset=`
+  - 区间过滤 + 分页；响应：`{ tasks, total, limit, offset }`
+
+7. 设置冲突边界模式 `POST /api/settings/conflict-mode`
+  - 请求：`{ boundaryConflictInclusive:boolean }`（true=端点相接算冲突）
+
+### 冲突判定优先级 / Conflict Boundary Priority
+单项请求级 > 批量顶层 > 用户级（`User.conflictBoundaryInclusive`）。
+默认半开区间 `[start, end)`，端点相接不算冲突；若设为 inclusive 则端点相接算冲突。
+
+### 冲突返回示例 / Conflict Response Example
+```
+{
+  "error": "conflict",
+  "message": "Schedule time conflict detected",
+  "candidate": { "id": "...", "name": "...", "startTime": "...", "endTime": "..." },
+  "conflicts": [ { "id": "...", "name": "...", "startTime": "...", "endTime": "..." } ]
+}
+```
+
+### 示例：创建任务 / Create Task
+```
+POST /api/tasks
+{
+  "name": "项目讨论",
+  "startTime": "2025-11-16T10:00:00.000Z",
+  "endTime": "2025-11-16T11:00:00.000Z",
+  "description": "冲刺计划",
+  "boundaryConflict": true
+}
+```
+
+### 示例：批量创建 / Batch Create
+```
+POST /api/tasks/batch
+{
+  "tasks": [
+   { "name": "A", "startTime": "2025-11-16T09:00:00Z", "endTime": "2025-11-16T10:00:00Z" },
+   { "name": "B", "startTime": "2025-11-16T09:30:00Z", "endTime": "2025-11-16T10:30:00Z" }
+  ]
+}
+```
+
+### 示例：更新任务 / Update Task
+```
+PUT /api/tasks/<taskId>
+{
+  "startTime": "2025-11-16T12:00:00Z",
+  "endTime": "2025-11-16T13:00:00Z",
+  "completed": true
+}
+```
+
+### 示例：设置边界模式 / Set Boundary Mode
+## 🔁 重复任务 / Recurring Tasks
+
+创建或批量创建时可传 `recurrenceRule`：
+```
+{
+  "name": "每日晨会",
+  "startTime": "2025-11-16T09:00:00Z",
+  "endTime": "2025-11-16T09:15:00Z",
+  "recurrenceRule": { "freq": "daily", "interval": 1, "count": 5 }
+}
+```
+- freq: `daily` 或 `weekly`
+- interval: 间隔（默认 1）
+- count: 生成次数（包含根任务时根任务只存规则；系统再生成 count-1 个实例）
+- until: 截止日期（与 count 二选一）
+根任务存储规则，生成的子实例包含 `parentTaskId` 指回根任务，不再携带 recurrenceRule。
+安全限制：未指定 count/until 时最多预生成 30 个实例。
+
+新增字段 `byDay`（仅 freq=weekly 时可用）：
+```
+"recurrenceRule": {
+  "freq": "weekly",
+  "interval": 1,
+  "byDay": ["Mon", "Wed", "Fri"],
+  "count": 10
+}
+```
+表示每周的周一、周三、周五各生成一个实例；若省略 `byDay` 则沿用根任务的星期。同一周内不会重复生成根任务自身日期。
+
+响应现在包含 `recurrenceSummary`：
+```
+{
+  "task": { ... 根任务 ... },
+  "recurrenceSummary": {
+    "createdInstances": 6,
+    "conflictInstances": 0,
+    "errorInstances": 0,
+    "requestedRule": { "freq": "weekly", "interval":1, "byDay":["Mon","Wed","Fri"], "count":7 }
+  }
+}
+```
+
+## 🔍 任务搜索 / Task Search
+GET `/api/tasks?q=keyword&completed=true|false` 同时支持 `start` / `end` / `limit` / `offset`。
+
+## 🔌 WebSocket 事件 / WebSocket Events
+连接地址（需附带 JWT）：`ws://<host>/ws?token=<JWT>`
+未提供或无效 JWT 会被拒绝（连接立即关闭）。各事件仅推送给所属用户（按 JWT 中 `sub` 隔离）。
+事件格式：
+1. 欢迎：`{ "type":"welcome", "time":"ISO" }`
+2. 任务变更：
+```
+{
+  "type": "taskChange",
+  "action": "created" | "updated" | "deleted" | "completed",
+  "task": { "id","name","startTime","endTime","completed","parentTaskId","recurrenceRule" }
+}
+```
+3. 任务发生（开始时间到达首次广播）：
+```
+{
+  "type": "taskOccurrence",
+  "taskId": "...",
+  "name": "...",
+  "startTime": "...",
+  "endTime": "..."
+}
+```
+去重策略：同一任务仅首次达到开始时间广播一次。
+
+4. 任务发生取消（在开始前被标记完成）：
+```
+{
+  "type": "taskOccurrenceCanceled",
+  "taskId": "...",
+  "name": "...",
+  "startTime": "..."
+}
+```
+
+客户端处理建议：
+- `taskChange.completed` 到达后可立即更新列表中完成状态。
+- 收到 `taskOccurrenceCanceled` 时若已排定提醒，可清除本地提醒。
+
+```
+POST /api/settings/conflict-mode
+{
+  "boundaryConflictInclusive": false
+}
+```
+
+
 ### TypeScript 配置 / TypeScript Configuration
 
 项目包含多个 TypeScript 配置文件：

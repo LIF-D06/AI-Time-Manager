@@ -3,6 +3,7 @@ import { open, Database } from 'sqlite';
 import { User, Task } from '../index';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../Utils/logger.js';
+import { assertNoConflict } from './scheduleConflict';
 
 class DatabaseService {
     private db: Database | null = null;
@@ -37,6 +38,7 @@ class DatabaseService {
                     timetableUrl TEXT DEFAULT '',
                     timetableFetchLevel INTEGER DEFAULT 0,
                     mailReadingSpan INTEGER DEFAULT 30,
+                    conflictBoundaryInclusive BOOLEAN DEFAULT 0,
                     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
@@ -73,6 +75,17 @@ class DatabaseService {
                 // 如果字段已存在，忽略错误
                 logger.info('mailReadingSpan column already exists or error adding it:', (e as Error).message);
             }
+
+            // 如果缺少 conflictBoundaryInclusive 字段则添加
+            try {
+                await this.db.exec(`ALTER TABLE users ADD COLUMN conflictBoundaryInclusive BOOLEAN DEFAULT 0;`);
+            } catch (e) {
+                logger.info('conflictBoundaryInclusive column already exists or error adding it:', (e as Error).message);
+            }
+
+            // tasks 表新增列（迁移场景）
+            try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN recurrenceRule TEXT;`); } catch (e) { logger.info('recurrenceRule column exists or error:', (e as Error).message); }
+            try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN parentTaskId TEXT;`); } catch (e) { logger.info('parentTaskId column exists or error:', (e as Error).message); }
             
             // 创建任务表
             await this.db.exec(`
@@ -89,6 +102,8 @@ class DatabaseService {
                     pushedToMSTodo BOOLEAN DEFAULT 0,
                     body TEXT,
                     attendees TEXT,
+                    recurrenceRule TEXT,
+                    parentTaskId TEXT,
                     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
@@ -107,10 +122,10 @@ class DatabaseService {
         
         await this.db.run(
             `INSERT INTO users 
-             (id, email, name, XJTLUaccount, XJTLUPassword, passwordHash, JWTtoken, MStoken, MSbinded, ebridgeBinded, timetableUrl, timetableFetchLevel, mailReadingSpan) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, email, name, XJTLUaccount, XJTLUPassword, passwordHash, JWTtoken, MStoken, MSbinded, ebridgeBinded, timetableUrl, timetableFetchLevel, mailReadingSpan, conflictBoundaryInclusive) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [user.id, user.email, user.name, user.XJTLUaccount, user.XJTLUPassword, user.passwordHash, 
-             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30]
+             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30, user.conflictBoundaryInclusive ? 1 : 0]
         );
         
         // 保存用户的任务
@@ -125,10 +140,10 @@ class DatabaseService {
         await this.db.run(
             `UPDATE users 
              SET email = ?, name = ?, XJTLUaccount = ?, XJTLUPassword = ?, passwordHash = ?, 
-                 JWTtoken = ?, MStoken = ?, MSbinded = ?, ebridgeBinded = ?, timetableUrl = ?, timetableFetchLevel = ?, mailReadingSpan = ?, updatedAt = CURRENT_TIMESTAMP
+                 JWTtoken = ?, MStoken = ?, MSbinded = ?, ebridgeBinded = ?, timetableUrl = ?, timetableFetchLevel = ?, mailReadingSpan = ?, conflictBoundaryInclusive = ?, updatedAt = CURRENT_TIMESTAMP
              WHERE id = ?`,
             [user.email, user.name, user.XJTLUaccount, user.XJTLUPassword, user.passwordHash, 
-             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30, user.id]
+             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30, user.conflictBoundaryInclusive ? 1 : 0, user.id]
         );
     }
     
@@ -178,32 +193,42 @@ class DatabaseService {
         return users;
     }
     
-    async addTask(userId: string, task: Task): Promise<void> {
+    async addTask(userId: string, task: Task, boundaryConflict?: boolean): Promise<void> {
         if (!this.db) throw new Error('Database not initialized');
+        // 冲突检测：在写入前基于当前用户的任务进行时段冲突检查
+        const existing = await this.getTasksByUserId(userId);
+        assertNoConflict(existing, task, { boundaryConflict: boundaryConflict ?? false });
         
         await this.db.run(
             `INSERT INTO tasks 
              (id, userId, name, description, dueDate, startTime, endTime, 
-              location, completed, pushedToMSTodo, body, attendees) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              location, completed, pushedToMSTodo, body, attendees, recurrenceRule, parentTaskId) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [task.id, userId, task.name, task.description, task.dueDate, 
              task.startTime, task.endTime, task.location, task.completed ? 1 : 0, 
-             task.pushedToMSTodo ? 1 : 0, task.body, task.attendees ? JSON.stringify(task.attendees) : null]
+              task.pushedToMSTodo ? 1 : 0, task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null]
         );
     }
     
-    async updateTask(task: Task): Promise<void> {
+    async updateTask(task: Task, boundaryConflict?: boolean): Promise<void> {
         if (!this.db) throw new Error('Database not initialized');
-        
+        // 在更新任务前执行冲突检测：需要找出该任务所属用户的所有其他任务
+        const row = await this.db.get('SELECT userId FROM tasks WHERE id = ?', [task.id]);
+        if (row && row.userId) {
+            const existing = await this.getTasksByUserId(row.userId);
+            // 排除自身后进行冲突检测
+            const others = existing.filter(t => t.id !== task.id);
+            assertNoConflict(others, task, { boundaryConflict: boundaryConflict ?? false });
+        }
         await this.db.run(
             `UPDATE tasks 
              SET name = ?, description = ?, dueDate = ?, startTime = ?, endTime = ?, 
-                 location = ?, completed = ?, pushedToMSTodo = ?, body = ?, attendees = ?, 
+                 location = ?, completed = ?, pushedToMSTodo = ?, body = ?, attendees = ?, recurrenceRule = ?, parentTaskId = ?, 
                  updatedAt = CURRENT_TIMESTAMP
              WHERE id = ?`,
             [task.name, task.description, task.dueDate, task.startTime, task.endTime, 
-             task.location, task.completed ? 1 : 0, task.pushedToMSTodo ? 1 : 0, 
-             task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.id]
+              task.location, task.completed ? 1 : 0, task.pushedToMSTodo ? 1 : 0, 
+              task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.id]
         );
     }
     
@@ -226,8 +251,37 @@ class DatabaseService {
             completed: row.completed === 1,
             pushedToMSTodo: row.pushedToMSTodo === 1,
             body: row.body,
-            attendees: row.attendees ? JSON.parse(row.attendees) : undefined
+            attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
+            recurrenceRule: row.recurrenceRule || undefined,
+            parentTaskId: row.parentTaskId || undefined
         }));
+    }
+
+    async getTaskById(id: string): Promise<Task | null> {
+        if (!this.db) throw new Error('Database not initialized');
+        const row = await this.db.get('SELECT * FROM tasks WHERE id = ?', [id]);
+        if (!row) return null;
+        return {
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            dueDate: row.dueDate,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            location: row.location,
+            completed: row.completed === 1,
+            pushedToMSTodo: row.pushedToMSTodo === 1,
+            body: row.body,
+            attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
+            recurrenceRule: row.recurrenceRule || undefined,
+            parentTaskId: row.parentTaskId || undefined
+        } as Task;
+    }
+
+    async deleteTask(id: string): Promise<boolean> {
+        if (!this.db) throw new Error('Database not initialized');
+        const result: any = await this.db.run('DELETE FROM tasks WHERE id = ?', [id]);
+        return (result?.changes || 0) > 0;
     }
     
     private mapRowToUser(row: any, tasks: Task[]): User {
@@ -245,6 +299,7 @@ class DatabaseService {
             timetableUrl: row.timetableUrl || '',
             timetableFetchLevel: row.timetableFetchLevel || 0,
             mailReadingSpan: row.mailReadingSpan ?? 30,
+            conflictBoundaryInclusive: row.conflictBoundaryInclusive === 1,
             tasks: tasks,
             emsClient: undefined // 运行时生成，不持久化
         };
