@@ -13,7 +13,7 @@ else:
     sys.exit(1)
 
 
-browser = BrowserEmulator(headless=True)
+browser = BrowserEmulator(headless=False)
 browser.start()
 browser.visit("https://ebridge.xjtlu.edu.cn")
 time.sleep(3)
@@ -29,4 +29,4 @@ browser.eval_js('window.location = document.querySelector("#collapsible-panel-I7
 time.sleep(1)
 browser.focusedpage.query_selector("body > div.sv-page-wrapper > div.sv-page-content.sv-container-fluid > div.sv-row > div > div:nth-child(2) > div.sv-list-group > div > div > div.sv-row > div > div:nth-child(1) > div > a > div").click()
 print(browser.eval_js("document.getElementById('myFrame').src"))
-time.sleep(1)
+time.sleep(2)

@@ -316,7 +316,8 @@ RecurrenceSummary（创建/批量创建响应中）:
 删除任务并广播 `deleted`。
 
 ### GET /api/tasks
-查询与过滤：支持 `q`（名称/描述模糊），`completed`（true|false），`startAfter`, `endBefore`。返回用户全部匹配任务。
+查询与过滤：支持 `q`（名称/描述模糊），`completed`（true|false），时间窗口与分页排序：
+`start`、`end`、`limit`、`offset` 或 `page`、`sortBy`（startTime|dueDate|name）、`order`（asc|desc）。
 
 ### POST /api/settings/conflict-mode
 设置端点相接是否视为冲突：
@@ -324,6 +325,35 @@ RecurrenceSummary（创建/批量创建响应中）:
 { "inclusive": true }
 ```
 影响后续创建/更新的判定逻辑（闭区间 vs 半开区间）。
+
+---
+
+## 用户日志 API（需 Authorization: Bearer <JWT>）
+
+### GET /api/logs
+查询当前用户的操作日志（分页、按时间与类型过滤）。
+
+Query 参数：
+- `limit`：每页数量（默认 50，最大 500）
+- `offset`：偏移量（默认 0）
+- `since`：起始时间（ISO 字符串，含边界）
+- `until`：截止时间（ISO 字符串，含边界）
+- `type`：日志类型（如 `taskCreated`、`taskUpdated`、`taskDeleted`、`taskConflict`、`taskError`、`emailProcessed`、`msTodoPushed`、`timetableFetched` 等）
+
+响应：200
+```
+{
+  "logs": [
+    { "id": "...", "time": "ISO", "type": "taskCreated", "message": "...", "payload": { /* 可选上下文 */ }},
+    ...
+  ],
+  "total": 123,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+说明：日志用于帮助用户了解系统自动化行为（如抓取到的邮件、添加的日程、推送到 MS To Do 的状态等）。
 
 ---
 
@@ -364,6 +394,8 @@ URL: `ws://<host>/ws?token=<JWT>` 必须携带有效 JWT（`sub` 为用户 ID）
    `{ type:'taskOccurrence', taskId, name, startTime, endTime }`
 3. `taskOccurrenceCanceled`: 任务在开始前被标记完成后广播一次。
    `{ type:'taskOccurrenceCanceled', taskId, startTime }`
+4. `userLog`: 针对当前连接用户的日志事件。
+  `{ type:'userLog', log: { id, time, type, message, payload? } }`
 4. `error`: 认证失败等 `{ type:'error', error:'AUTH_REQUIRED'|'INVALID_TOKEN' }`
 5. `welcome`: 连接成功 `{ type:'welcome', time, userId }`
 

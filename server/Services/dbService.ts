@@ -109,12 +109,54 @@ class DatabaseService {
                     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
                 );
             `);
+
+            // 创建用户日志表
+            await this.db.exec(`
+                CREATE TABLE IF NOT EXISTS user_logs (
+                    id TEXT PRIMARY KEY,
+                    userId TEXT NOT NULL,
+                    time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    type TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    payload TEXT,
+                    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+                );
+            `);
             
             logger.success('Database initialized successfully');
         } catch (error) {
             logger.error('Failed to initialize database:', error);
             throw error;
         }
+    }
+
+    async addUserLog(userId: string, type: string, message: string, payload?: any): Promise<{ id: string; time: string; type: string; message: string; payload?: any }> {
+        if (!this.db) throw new Error('Database not initialized');
+        const id = uuidv4();
+        const payloadStr = payload !== undefined ? JSON.stringify(payload) : null;
+        await this.db.run(
+            `INSERT INTO user_logs (id, userId, type, message, payload) VALUES (?, ?, ?, ?, ?)`,
+            [id, userId, type, message, payloadStr]
+        );
+        const row: any = await this.db.get(`SELECT * FROM user_logs WHERE id = ?`, [id]);
+        return { id: row.id, time: row.time, type: row.type, message: row.message, payload: row.payload ? JSON.parse(row.payload) : undefined };
+    }
+
+    async getUserLogsPage(userId: string, opts?: { limit?: number; offset?: number; since?: string; until?: string; type?: string }): Promise<{ logs: Array<{ id: string; time: string; type: string; message: string; payload?: any }>; total: number }> {
+        if (!this.db) throw new Error('Database not initialized');
+        const where: string[] = ['userId = ?'];
+        const params: any[] = [userId];
+        if (opts?.since) { where.push('time >= ?'); params.push(opts.since); }
+        if (opts?.until) { where.push('time <= ?'); params.push(opts.until); }
+        if (opts?.type) { where.push('type = ?'); params.push(opts.type); }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const limit = Math.max(1, Math.min(500, opts?.limit || 50));
+        const offset = Math.max(0, opts?.offset || 0);
+        const countRow: any = await this.db.get(`SELECT COUNT(*) as cnt FROM user_logs ${whereSql}`, params);
+        const total = countRow ? (countRow.cnt || 0) : 0;
+        const rows = await this.db.all(`SELECT * FROM user_logs ${whereSql} ORDER BY time DESC LIMIT ? OFFSET ?`, params.concat([limit, offset]));
+        const logs = rows.map((r: any) => ({ id: r.id, time: r.time, type: r.type, message: r.message, payload: r.payload ? JSON.parse(r.payload) : undefined }));
+        return { logs, total };
     }
     
     async addUser(user: User): Promise<void> {

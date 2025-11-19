@@ -14,6 +14,7 @@ import { Options, PythonShell } from 'python-shell';
 import { ExchangeConfig, TimetableActivity } from './Services/types';
 import { ScheduleConflictError } from './Services/scheduleConflict';
 import { initWebSocket, broadcastTaskChange } from './Services/websocket';
+import { logUserEvent } from './Services/userLog';
 import { logger } from './Utils/logger.js';
 import { EmailMessageSchema, SearchFilter } from 'ews-javascript-api';
 
@@ -471,6 +472,7 @@ setInterval(async () => {
                 );
                 
                 logger.info(`Fetched ${events.length} events for user ${user.id}`);
+                await logUserEvent(user.id, 'eventsFetched', `Fetched ${events.length} calendar events`, { count: events.length });
                 
                 // 检查并添加新事件
                 for (const event of events) {
@@ -494,16 +496,20 @@ setInterval(async () => {
                         broadcastTaskChange('created', newTask, user.id);
                         // 增量刷新缓存：合并新创建的事件任务
                         await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
+                        await logUserEvent(user.id, 'taskCreated', `Created task from calendar event: ${newTask.name}`, { id: newTask.id, source: 'Exchange', startTime: newTask.startTime, endTime: newTask.endTime });
                     } catch (e:any) {
                         if (e instanceof ScheduleConflictError) {
                             logger.warn(`Skipped conflicting event task ${newTask.id} for user ${user.id}`);
+                            await logUserEvent(user.id, 'taskConflict', `Skipped conflicting calendar event: ${newTask.name}`, { id: newTask.id, startTime: newTask.startTime, endTime: newTask.endTime });
                         } else {
                             logger.error(`Failed to persist event task ${newTask.id} for user ${user.id}:`, e);
+                            await logUserEvent(user.id, 'taskError', `Failed to persist calendar event: ${newTask.name}`, { id: newTask.id, error: (e as any)?.message });
                         }
                     }
                 }
             } catch (error) {
                 console.error(`Failed to get events for user ${user.id}:`, error);
+                await logUserEvent(user.id, 'eventsError', `Failed to fetch calendar events`, { error: (error as any)?.message });
             }
             
             // 仅在内存中保存客户端实例
@@ -521,11 +527,13 @@ setInterval(async () => {
                 const fullEmail = await user.emsClient.getEmailById(email.id);
                 // 解析邮件内容
                 await user.emsClient.autoProcessNewEmail(fullEmail);
+                await logUserEvent(user.id, 'emailProcessed', `Processed email ${email.id}`, { emailId: email.id });
                 user.mailReadingSpan--;
                 await dbService.updateUser(user);
                 logger.info(`Decremented mailReadingSpan for user ${user.id}, new value: ${user.mailReadingSpan}`);
             } catch (emailError) {
                 logger.error(`Failed to read email for user ${user.id}:`, emailError);
+                await logUserEvent(user.id, 'emailError', `Failed to process email`, { error: (emailError as any)?.message });
             }
         }
         
@@ -568,6 +576,7 @@ setInterval(async () => {
                     
                     // 更新数据库中的任务
                     await dbService.updateTask(task);
+                    await logUserEvent(user.id, 'msTodoPushed', `Pushed task to MS To Do: ${task.name}`, { id: task.id });
                 } catch (error: any) {
                     if (error.response?.status === 401) {
                         logger.error(`MS Graph API 401 Unauthorized for task ${task.id}: Token may be expired or invalid`);
@@ -580,6 +589,7 @@ setInterval(async () => {
                         logger.error(`MS Graph API ${error.response.status} error for task ${task.id}:`, error.response.data || error.message);
                     } else {
                         logger.error(`Failed to push task ${task.id} to MS Todo:`, error.message || error);
+                        await logUserEvent(user.id, 'msTodoPushError', `Failed to push task to MS To Do: ${task.name}`, { id: task.id, error: error?.message, status: error?.response?.status });
                     }
                     // 继续处理其他任务，不中断整个流程
                     continue;
@@ -656,6 +666,7 @@ setInterval(async () => {
                     
                     if (response.status === 200 && Array.isArray(response.data)) {
                         logger.success(`Successfully fetched timetable data for user ${user.id}, found ${response.data.length} activities`);
+                        await logUserEvent(user.id, 'timetableFetched', `Fetched timetable activities: ${response.data.length}`, { count: response.data.length });
                         
                         // 更新用户的timetableFetchLevel为当前环境变量的值
                         const envFetchLevel = parseInt(process.env.timetableFetchLevel || '0');
@@ -793,11 +804,14 @@ setInterval(async () => {
                                                 broadcastTaskChange('created', newTask, user.id);
                                                 await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
                                                 logger.info(`Added timetable task: ${newTask.name} on ${courseDate.toLocaleDateString()} (Week: ${currentWeekNumber}) for user ${user.id}`);
+                                                await logUserEvent(user.id, 'taskCreated', `Created timetable task ${newTask.name}`, { id: newTask.id, startTime: newTask.startTime, endTime: newTask.endTime });
                                             } catch (e:any) {
                                                 if (e instanceof ScheduleConflictError) {
                                                     logger.warn(`Skipped conflicting timetable task ${newTask.id} for user ${user.id}`);
+                                                    await logUserEvent(user.id, 'taskConflict', `Skipped conflicting timetable task ${newTask.name}`, { id: newTask.id });
                                                 } else {
                                                     logger.error(`Failed to add timetable task ${newTask.id} for user ${user.id}:`, e);
+                                                    await logUserEvent(user.id, 'taskError', `Failed to add timetable task ${newTask.name}`, { id: newTask.id, error: (e as any)?.message });
                                                 }
                                             }
                                         }
@@ -805,16 +819,20 @@ setInterval(async () => {
                                 }
                             } catch (parseError) {
                                 logger.error(`Error processing activity ${activity.identity || 'unknown'}:`, parseError);
+                                await logUserEvent(user.id, 'timetableParseError', `Failed to process timetable activity`, { activityId: activity.identity || 'unknown', error: (parseError as any)?.message });
                             }
                         }
                     }else{
                         logger.warn(`Failed to fetch timetable for user ${user.id}`);
+                        await logUserEvent(user.id, 'timetableError', `Failed to fetch timetable`, {});
                     }
                 } else {
                     logger.warn(`Failed to extract hash from timetableUrl for user ${user.id} `);
+                    await logUserEvent(user.id, 'timetableError', `Failed to extract timetable hash`, {});
                 }
             } catch (error) {
                 logger.error(`Failed to process timetable for user ${user.id}:`, error);
+                await logUserEvent(user.id, 'timetableError', `Failed to process timetable`, { error: (error as any)?.message });
             }
         }
     }
@@ -826,6 +844,7 @@ export async function createTaskToUser(user: User, taskData: Task): Promise<void
     try {
         await dbService.addTask(user.id, taskData);
         await dbService.refreshUserTasksIncremental(user, { addedIds: [taskData.id] });
+        await logUserEvent(user.id, 'taskCreated', `Created task ${taskData.name} via helper`, { id: taskData.id });
         logger.success(`Task created successfully for user ${user.id}: ${taskData.name}`);
     } catch (error) {
         logger.error(`Failed to create task for user ${user.id}:`, error);

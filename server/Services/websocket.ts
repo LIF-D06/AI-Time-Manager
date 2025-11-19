@@ -85,6 +85,18 @@ export function broadcastTaskChange(action: 'created' | 'updated' | 'deleted' | 
   }
 }
 
+export function broadcastUserLog(userId: string, log: { id: string; time: string; type: string; message: string; payload?: any }) {
+  if (!wss) return;
+  const payload = JSON.stringify({ type: 'userLog', log });
+  for (const client of wss.clients) {
+    const c = client as AuthedSocket;
+    if (c.userId !== userId) continue;
+    if ((client as any).readyState === 1) {
+      try { client.send(payload); } catch (_) {}
+    }
+  }
+}
+
 function broadcastTaskOccurrence(task: Task, userId: string) {
   if (!wss) return;
   const payload = JSON.stringify({

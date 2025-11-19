@@ -3,10 +3,11 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { User, Task } from '../index';
 import { logger } from '../Utils/logger.js';
-import { dbService } from '../Services/dbService';
-import { findConflictingTasks, ScheduleConflictError } from '../Services/scheduleConflict';
-import { generateRecurrenceInstances, buildRecurrenceSummary } from '../Services/recurrence';
-import { broadcastTaskChange } from '../Services/websocket';
+import { dbService } from '../Services/dbService.js';
+import { findConflictingTasks, ScheduleConflictError } from '../Services/scheduleConflict.js';
+import { generateRecurrenceInstances, buildRecurrenceSummary } from '../Services/recurrence.js';
+import { broadcastTaskChange } from '../Services/websocket.js';
+import { logUserEvent } from '../Services/userLog.js';
 
 // 身份验证中间件引用
 export interface AuthMiddleware {
@@ -69,6 +70,21 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
     }
   });
 
+  // 获取用户日志（分页、可按时间与类型过滤）
+  router.get('/logs', authenticateToken, async (req: any, res: any) => {
+    try {
+      const user = req.user as User;
+      const { limit = '50', offset = '0', since, until, type } = req.query;
+      const lim = Math.max(1, Math.min(500, parseInt(limit as string, 10) || 50));
+      const off = Math.max(0, parseInt(offset as string, 10) || 0);
+      const { logs, total } = await dbService.getUserLogsPage(user.id, { limit: lim, offset: off, since: since as string | undefined, until: until as string | undefined, type: type as string | undefined });
+      return res.status(200).json({ logs, total, limit: lim, offset: off });
+    } catch (e) {
+      logger.error('Fetch user logs failed:', e);
+      return res.status(500).json({ error: 'Failed to fetch logs' });
+    }
+  });
+
   // 创建任务（带冲突检测 + boundary 配置 + 重复实例统计）
   router.post('/tasks', authenticateToken, async (req: any, res: any) => {
     try {
@@ -102,6 +118,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         throw e;
       }
       broadcastTaskChange('created', task, user.id);
+      await logUserEvent(user.id, 'taskCreated', `Created task ${task.name}`, { id: task.id, startTime: task.startTime, endTime: task.endTime });
       let createdChildren = 0, conflictChildren = 0, errorChildren = 0;
       const createdIds: string[] = [task.id];
       if (recurrenceRule) {
@@ -112,11 +129,14 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
             createdChildren++;
             createdIds.push(inst.id);
             broadcastTaskChange('created', inst, user.id);
+            await logUserEvent(user.id, 'taskCreated', `Created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
           } catch (e: any) {
             if (e instanceof ScheduleConflictError) {
               conflictChildren++;
+              await logUserEvent(user.id, 'taskConflict', `Conflict creating recurrence instance for ${task.name}`, { parentId: task.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
             } else {
               errorChildren++;
+              await logUserEvent(user.id, 'taskError', `Error creating recurrence instance for ${task.name}`, { parentId: task.id, error: e?.message });
             }
           }
         }
@@ -195,6 +215,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
           try {
           await dbService.addTask(user.id, task, effectiveBoundary);
           broadcastTaskChange('created', task, user.id);
+          await logUserEvent(user.id, 'taskCreated', `Batch created task ${task.name}`, { id: task.id, startTime: task.startTime, endTime: task.endTime });
           let createdChildren = 0, conflictChildren = 0, errorChildren = 0;
           const createdIds: string[] = [task.id];
           if (recurrenceRule) {
@@ -205,11 +226,14 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
                 createdChildren++;
                 createdIds.push(inst.id);
                 broadcastTaskChange('created', inst, user.id);
+                await logUserEvent(user.id, 'taskCreated', `Batch created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
               } catch (e: any) {
                 if (e instanceof ScheduleConflictError) {
                   conflictChildren++;
+                  await logUserEvent(user.id, 'taskConflict', `Conflict creating batch instance for ${task.name}`, { parentId: task.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
                 } else {
                   errorChildren++;
+                  await logUserEvent(user.id, 'taskError', `Error creating batch instance for ${task.name}`, { parentId: task.id, error: e?.message });
                 }
               }
             }
@@ -228,9 +252,11 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
               status: 'conflict',
               conflictList: e.conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
             });
+            await logUserEvent(user.id, 'taskConflict', `Conflict creating task ${name}`, { startTime, endTime, conflicts: e.conflicts });
           } else {
             errors++;
             results.push({ input, status: 'error', errorMessage: e?.message || 'unknown error' });
+            await logUserEvent(user.id, 'taskError', `Error creating task ${name}`, { startTime, endTime, error: e?.message });
           }
         }
       }
@@ -285,8 +311,10 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
         await dbService.updateTask(updated, effectiveBoundary);
         broadcastTaskChange('updated', updated, user.id);
+        await logUserEvent(user.id, 'taskUpdated', `Updated task ${updated.name}`, { id: updated.id, changes: { name, description, startTime, endTime, dueDate, location, completed } });
         if (completed === true && !existing.completed) {
           broadcastTaskChange('completed', updated, user.id);
+          await logUserEvent(user.id, 'taskCompleted', `Completed task ${updated.name}`, { id: updated.id });
         }
         // 增量刷新缓存：仅合并被更新的任务
         await dbService.refreshUserTasksIncremental(user, { updatedIds: [updated.id] });
@@ -299,6 +327,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
             candidate: { id: updated.id, name: updated.name, startTime: updated.startTime, endTime: updated.endTime },
             conflicts: e.conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
           });
+          // log in conflict branch too (but response already returned)
         }
         logger.error('Failed to update task:', e);
         return res.status(500).json({ error: 'Failed to update task' });
@@ -322,6 +351,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         const deletedOk = await dbService.deleteTask(taskId);
         if (deletedOk) {
           broadcastTaskChange('deleted', deletedTask, user.id);
+          await logUserEvent(user.id, 'taskDeleted', `Deleted task ${deletedTask.name}`, { id: deletedTask.id });
           // 增量刷新缓存：移除已删除 id
           await dbService.refreshUserTasksIncremental(user, { deletedIds: [taskId] });
           return res.status(200).json({ id: taskId, deleted: true });
@@ -353,6 +383,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         // 广播已删除项
         for (const del of deletedItems) {
           broadcastTaskChange('deleted', del, user.id);
+          await logUserEvent(user.id, 'taskDeleted', `Cascade deleted task ${del.name}`, { id: del.id, parentId: del.parentTaskId || null });
         }
         if (anyFailed) return res.status(500).json({ error: 'Failed to fully delete cascade tasks' });
         // 增量刷新缓存：移除已删除的所有 id

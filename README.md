@@ -1,7 +1,5 @@
 # AI Time Manager - 智能时间管理助手
 
-> See the latest development changes: [changes.md](./changes.md)
-
 <p align="center">
   <img src="https://img.shields.io/badge/React-19.2.0-blue" alt="React">
   <img src="https://img.shields.io/badge/TypeScript-5.9.3-blue" alt="TypeScript">
@@ -148,6 +146,7 @@ npm run preview
 - Microsoft OAuth 流程 / Microsoft OAuth Flow
 - JWT 令牌管理 / JWT Token Management
 - 错误处理说明 / Error Handling
+- 用户日志查询（`GET /api/logs`）与 WebSocket 日志事件（`userLog`）
 
 ## 🗓️ 日程与冲突检测 API / Scheduling & Conflict Detection APIs
 
