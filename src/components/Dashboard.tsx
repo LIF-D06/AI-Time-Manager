@@ -1,20 +1,33 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   startMicrosoftAuth, 
   removeToken, 
+  getToken,
   updateEbridgePassword,
   getMicrosoftTodoStatus,
   getEbridgeStatus,
   type MicrosoftTodoStatus,
   type EbridgeStatus
 } from '../services/api';
+import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
+import { Button } from './ui/Button';
+import { Badge } from './ui/Badge';
+import AllSchedule from './Schedule/AllSchedule';
+import TodaySchedule from './Schedule/TodaySchedule';
+import LogViewer from './Logs/LogViewer';
+import AIChat from './AIChat/AIChat';
+import { LayoutDashboard, Calendar, ListTodo, FileText, LogOut, MessageSquare } from 'lucide-react';
 import '../styles/Dashboard.css';
 
 interface DashboardProps {
   onLogout: () => void;
+  view?: string;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [ebPassword, setEbPassword] = useState('');
   const [password, setPassword] = useState('');
   const [email] = useState(localStorage.getItem('user_email') || '');
@@ -26,6 +39,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [ebridgeStatus, setEbridgeStatus] = useState<EbridgeStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [statusError, setStatusError] = useState('');
+  const [tokenCopied, setTokenCopied] = useState(false);
 
   // 获取API状态
   useEffect(() => {
@@ -83,6 +97,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     removeToken();
     localStorage.removeItem('user_email');
     onLogout();
+    navigate('/login');
   };
 
   const handleRefreshStatus = async () => {
@@ -104,6 +119,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     }
   };
 
+  const handleCopyToken = () => {
+    const token = getToken();
+    if (token) {
+      navigator.clipboard.writeText(token).then(() => {
+        setTokenCopied(true);
+        setTimeout(() => setTokenCopied(false), 2000);
+      });
+    }
+  };
+
   const renderConnectionStatus = () => {
     if (statusLoading) {
       return <div className="status-loading">正在检查连接状态...</div>;
@@ -114,29 +139,46 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     }
 
     return (
-      <div className="connection-status-section">
-        <h3>连接状态</h3>
-        <div className="status-container">
-          <div className={`status-item ${msTodoStatus?.connected ? 'connected' : 'disconnected'}`}>
-            <span className="status-label">Microsoft To Do:</span>
-            <span className="status-value">
-              {msTodoStatus?.connected ? '已连接' : '未连接'}
-            </span>
-            {msTodoStatus?.connected && <span className="status-badge connected">✓</span>}
+      <Card className="connection-status-section">
+        <CardHeader>
+          <CardTitle>连接状态</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="status-container">
+            <div className={`status-item ${msTodoStatus?.connected ? 'connected' : 'disconnected'}`}>
+              <span className="status-label">Microsoft To Do:</span>
+              <span className="status-value">
+                {msTodoStatus?.connected ? '已连接' : '未连接'}
+              </span>
+              {msTodoStatus?.connected && <Badge variant="success">✓</Badge>}
+            </div>
+            
+            <div className={`status-item ${ebridgeStatus?.connected ? 'connected' : 'disconnected'}`}>
+              <span className="status-label">Ebridge:</span>
+              <span className="status-value">
+                {ebridgeStatus?.connected ? '已连接' : '未连接'}
+              </span>
+              {ebridgeStatus?.connected && <Badge variant="success">✓</Badge>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px' }}>
+            <Button onClick={handleRefreshStatus}>
+              刷新状态
+            </Button>
           </div>
           
-          <div className={`status-item ${ebridgeStatus?.connected ? 'connected' : 'disconnected'}`}>
-            <span className="status-label">Ebridge:</span>
-            <span className="status-value">
-              {ebridgeStatus?.connected ? '已连接' : '未连接'}
-            </span>
-            {ebridgeStatus?.connected && <span className="status-badge connected">✓</span>}
+          <div className="mcp-token-section">
+            <h4>MCP 鉴权 Token</h4>
+            <p>用于配置 MCP 客户端访问您的数据</p>
+            <Button 
+              variant={tokenCopied ? 'success' : 'secondary'}
+              onClick={handleCopyToken}
+            >
+              {tokenCopied ? '已复制到剪贴板!' : '复制 Access Token'}
+            </Button>
           </div>
-        </div>
-        <button className="refresh-button" onClick={handleRefreshStatus}>
-          刷新状态
-        </button>
-      </div>
+        </CardContent>
+      </Card>
     );
   };
 
@@ -191,16 +233,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     );
   };
 
-  return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <h1>TimeManager</h1>
-        <button className="logout-button" onClick={handleLogout}>
-          退出登录
-        </button>
-      </header>
-
-      <main className="dashboard-content">
+  const renderMainContent = () => {
+    if (view === 'all-schedule') return <AllSchedule />;
+    if (view === 'today-schedule') return <TodaySchedule />;
+    if (view === 'logs') return <LogViewer />;
+    if (view === 'chat') return <AIChat />;
+    
+    // Default Dashboard View
+    return (
+      <>
         {/* 连接状态显示 */}
         {renderConnectionStatus()}
         
@@ -212,66 +253,127 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         {/* Microsoft连接按钮 - 只有在未连接时显示 */}
         {!msTodoStatus?.connected && (
           <section className="microsoft-section">
-            <button 
-              className="microsoft-button" 
+            <Button 
+              variant="primary"
+              size="lg"
               onClick={handleConnectMicrosoft}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '8px' }}>
                 <path d="M19.19 10.47l-1.9-1.9c-3.68-3.67-9.68-3.67-13.36 0-1.42 1.42-2.14 3.32-2.14 5.23 0 1.9.72 3.8 2.14 5.23 3.68 3.67 9.68 3.67 13.36 0l1.9-1.9c.75-.75.75-1.98 0-2.73s-1.98-.75-2.73 0l-1.9 1.9c-2.1 2.1-5.53 2.1-7.63 0-1.26-1.26-1.26-3.31 0-4.57 2.1-2.1 5.53-2.1 7.63 0l1.9 1.9c.75.75 1.98.75 2.73 0 .75-.75.75-1.98 0-2.73zM12 15.6v-11.2l5.6 5.6z"/>
               </svg>
               连接 Microsoft 账户
-            </button>
+            </Button>
           </section>
         )}
 
         {/* Ebridge密码更新表单 - 只有在未连接时显示 */}
         {!ebridgeStatus?.connected && (
-          <section className="password-section">
-            <h3>更新 Ebridge 密码</h3>
-            {message && <div className="success-message">{message}</div>}
-            {error && <div className="error-message">{error}</div>}
-            <form onSubmit={handleUpdatePassword}>
-              <div className="form-group">
-                <label htmlFor="XJTLUaccount">XJTLU 账号</label>
-                <input
-                  type="text"
-                  id="XJTLUaccount"
-                  value={XJTLUaccount}
-                  onChange={(e) => setXJTLUaccount(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="ebPassword">Ebridge 密码</label>
-                <input
-                  type="password"
-                  id="ebPassword"
-                  value={ebPassword}
-                  onChange={(e) => setEbPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="password">本次操作敏感，需要您输入本平台密码</label>
-                <input
-                  type="password"
-                  id="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <button type="submit" className="update-button" disabled={loading}>
-                {loading ? '更新中...' : '更新密码'}
-              </button>
-            </form>
-          </section>
+          <Card className="password-section">
+            <CardHeader>
+              <CardTitle style={{ justifyContent: 'center' }}>更新 Ebridge 密码</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {message && <div className="success-message">{message}</div>}
+              {error && <div className="error-message">{error}</div>}
+              <form onSubmit={handleUpdatePassword}>
+                <div className="form-group">
+                  <label htmlFor="XJTLUaccount">XJTLU 账号</label>
+                  <input
+                    type="text"
+                    id="XJTLUaccount"
+                    value={XJTLUaccount}
+                    onChange={(e) => setXJTLUaccount(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="ebPassword">Ebridge 密码</label>
+                  <input
+                    type="password"
+                    id="ebPassword"
+                    value={ebPassword}
+                    onChange={(e) => setEbPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="password">本次操作敏感，需要您输入本平台密码</label>
+                  <input
+                    type="password"
+                    id="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                <Button type="submit" disabled={loading} style={{ width: '100%' }}>
+                  {loading ? '更新中...' : '更新密码'}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
         )}
-      </main>
+      </>
+    );
+  };
 
-      <footer className="dashboard-footer">
-        <p>TimeManager © {new Date().getFullYear()}</p>
-      </footer>
+  return (
+    <div className="dashboard-layout">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <h1>TimeManager</h1>
+        </div>
+        <nav className="sidebar-nav">
+          <button 
+            className={`nav-item ${!view || view === 'dashboard' ? 'active' : ''}`}
+            onClick={() => navigate('/dashboard')}
+          >
+            <LayoutDashboard size={20} /> 仪表盘
+          </button>
+          <button 
+            className={`nav-item ${view === 'today-schedule' ? 'active' : ''}`}
+            onClick={() => navigate('/schedule/today')}
+          >
+            <ListTodo size={20} /> 今日日程
+          </button>
+          <button 
+            className={`nav-item ${view === 'all-schedule' ? 'active' : ''}`}
+            onClick={() => navigate('/schedule/all')}
+          >
+            <Calendar size={20} /> 全部日程
+          </button>
+          <button 
+            className={`nav-item ${view === 'chat' ? 'active' : ''}`}
+            onClick={() => navigate('/chat')}
+          >
+            <MessageSquare size={20} /> AI 助手
+          </button>
+          <button 
+            className={`nav-item ${view === 'logs' ? 'active' : ''}`}
+            onClick={() => navigate('/logs')}
+          >
+            <FileText size={20} /> 系统日志
+          </button>
+        </nav>
+import { Button } from './ui/Button';
+
+// ...existing code...
+
+        <div className="sidebar-footer">
+          <Button 
+            variant="danger" 
+            className="logout-button-sidebar" 
+            onClick={handleLogout}
+            style={{ width: '100%', justifyContent: 'flex-start' }}
+          >
+            <LogOut size={18} style={{ marginRight: '8px' }} /> 退出登录
+          </Button>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        {renderMainContent()}
+      </main>
     </div>
   );
 };

@@ -1,40 +1,29 @@
 import { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
+import AllSchedule from './components/Schedule/AllSchedule';
+import TodaySchedule from './components/Schedule/TodaySchedule';
+import LogViewer from './components/Logs/LogViewer';
 import { isAuthenticated } from './services/api';
 import './App.css';
 
 function App() {
-  const [currentView, setCurrentView] = useState<'login' | 'register' | 'dashboard'>('login');
   const [isLoading, setIsLoading] = useState(true);
+  const [isAuth, setIsAuth] = useState(false);
 
   useEffect(() => {
-    // 检查是否已登录
-    if (isAuthenticated()) {
-      setCurrentView('dashboard');
-    }
+    setIsAuth(isAuthenticated());
     setIsLoading(false);
   }, []);
 
   const handleLoginSuccess = () => {
-    setCurrentView('dashboard');
-  };
-
-  const handleRegisterSuccess = () => {
-    setCurrentView('dashboard');
+    setIsAuth(true);
   };
 
   const handleLogout = () => {
-    setCurrentView('login');
-  };
-
-  const switchToRegister = () => {
-    setCurrentView('register');
-  };
-
-  const switchToLogin = () => {
-    setCurrentView('login');
+    setIsAuth(false);
   };
 
   if (isLoading) {
@@ -47,35 +36,26 @@ function App() {
   }
 
   return (
-    <div className="app">
-      {currentView === 'login' && (
-        <div className="auth-page">
-          <Login onLoginSuccess={handleLoginSuccess} />
-          <div className="switch-auth">
-            <p>还没有账号？</p>
-            <button className="switch-button" onClick={switchToRegister}>
-              立即注册
-            </button>
-          </div>
-        </div>
-      )}
+    <Router>
+      <div className="app">
+        <Routes>
+          <Route path="/login" element={!isAuth ? <Login onLoginSuccess={handleLoginSuccess} /> : <Navigate to="/dashboard" />} />
+          <Route path="/register" element={!isAuth ? <Register onRegisterSuccess={handleLoginSuccess} /> : <Navigate to="/dashboard" />} />
+          
+          <Route path="/dashboard" element={isAuth ? <Dashboard onLogout={handleLogout} /> : <Navigate to="/login" />}>
+             {/* Dashboard will handle sub-routes or we can define them here if Dashboard has an Outlet */}
+          </Route>
+          
+          {/* We might need to restructure Dashboard to be a layout or include navigation */}
+          <Route path="/schedule/all" element={isAuth ? <Dashboard onLogout={handleLogout} view="all-schedule" /> : <Navigate to="/login" />} />
+          <Route path="/schedule/today" element={isAuth ? <Dashboard onLogout={handleLogout} view="today-schedule" /> : <Navigate to="/login" />} />
+          <Route path="/logs" element={isAuth ? <Dashboard onLogout={handleLogout} view="logs" /> : <Navigate to="/login" />} />
+          <Route path="/chat" element={isAuth ? <Dashboard onLogout={handleLogout} view="chat" /> : <Navigate to="/login" />} />
 
-      {currentView === 'register' && (
-        <div className="auth-page">
-          <Register onRegisterSuccess={handleRegisterSuccess} />
-          <div className="switch-auth">
-            <p>已有账号？</p>
-            <button className="switch-button" onClick={switchToLogin}>
-              返回登录
-            </button>
-          </div>
-        </div>
-      )}
-
-      {currentView === 'dashboard' && (
-        <Dashboard onLogout={handleLogout} />
-      )}
-    </div>
+          <Route path="/" element={<Navigate to={isAuth ? "/dashboard" : "/login"} />} />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 

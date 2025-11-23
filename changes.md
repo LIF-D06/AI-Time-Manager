@@ -69,3 +69,30 @@ This section records the changes made on 2025-11-19.
 ```
 GET /api/logs?limit=50&offset=0&since=2025-11-19T00:00:00Z&until=2025-11-19T23:59:59Z&type=taskCreated
 ```
+
+# Changes — 2025-11-20
+
+## Summary
+- Refactored background timers out of `server/index.ts` into `server/intervals.ts`.
+- Implemented Model Context Protocol (MCP) service to allow LLM integration.
+
+## Detailed Changes (2025-11-20)
+
+1. Refactoring
+   - `server/intervals.ts`: Created new module to house background interval logic (Exchange sync, Ebridge check, Token expiry).
+   - `server/index.ts`: Removed inline `setInterval` blocks and replaced with `startIntervals()` call.
+
+2. MCP Service (Model Context Protocol)
+   - Dependencies: Added `@modelcontextprotocol/sdk`.
+   - `server/Services/mcp.ts`: Created MCP server using `SSEServerTransport`.
+     - Implemented tools:
+       - `read_emails`: Read recent emails (fetches full content).
+       - `add_schedule`: Add new tasks.
+       - `delete_schedule`: Delete tasks.
+       - `get_schedule`: Query tasks by date range.
+       - `get_server_time`: Get current server time.
+   - `server/index.ts`: Initialized MCP routes (`GET /api/mcp/sse`, `POST /api/mcp/messages`).
+
+## Usage
+- MCP Endpoint: `GET /api/mcp/sse` (Requires Authorization header with Bearer token).
+- Connect using an MCP client (e.g., Claude Desktop) by pointing it to the SSE endpoint (via a local proxy or direct if supported).

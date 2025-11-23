@@ -1,0 +1,147 @@
+/* Card Component */
+.ui-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s, box-shadow 0.2s;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.ui-card:hover {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.ui-card-header {
+  padding: 20px 24px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ui-card-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #2d3748;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-card-content {
+  padding: 0 24px 24px;
+  color: #718096;
+}
+
+.ui-card-footer {
+  padding: 12px 24px 24px;
+  display: flex;
+  align-items: center;
+}
+
+/* Button Component */
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  outline: none;
+  font-size: 0.875rem;
+  gap: 8px;
+}
+
+.ui-button-primary {
+  background-color: #3182ce;
+  color: white;
+}
+
+.ui-button-primary:hover {
+  background-color: #2c5282;
+}
+
+.ui-button-secondary {
+  background-color: #edf2f7;
+  color: #4a5568;
+}
+
+.ui-button-secondary:hover {
+  background-color: #e2e8f0;
+  color: #2d3748;
+}
+
+.ui-button-outline {
+  background-color: transparent;
+  border: 1px solid #e2e8f0;
+  color: #4a5568;
+}
+
+.ui-button-outline:hover {
+  background-color: #f7fafc;
+  border-color: #cbd5e0;
+}
+
+.ui-button-ghost {
+  background-color: transparent;
+  color: #4a5568;
+}
+
+.ui-button-ghost:hover {
+  background-color: #edf2f7;
+}
+
+.ui-button-danger {
+  background-color: #e53e3e;
+  color: white;
+}
+
+.ui-button-danger:hover {
+  background-color: #c53030;
+}
+
+.ui-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Badge Component */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.ui-badge-success {
+  background-color: #c6f6d5;
+  color: #22543d;
+}
+
+.ui-badge-warning {
+  background-color: #feebc8;
+  color: #744210;
+}
+
+.ui-badge-error {
+  background-color: #fed7d7;
+  color: #742a2a;
+}
+
+.ui-badge-info {
+  background-color: #bee3f8;
+  color: #2c5282;
+}
+
+.ui-badge-neutral {
+  background-color: #edf2f7;
+  color: #4a5568;
+}

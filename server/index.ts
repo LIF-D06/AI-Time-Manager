@@ -1,5 +1,3 @@
-
-
 import * as msal from '@azure/msal-node';
 import express from 'express';
 import axios from 'axios';
@@ -17,6 +15,9 @@ import { initWebSocket, broadcastTaskChange } from './Services/websocket';
 import { logUserEvent } from './Services/userLog';
 import { logger } from './Utils/logger.js';
 import { EmailMessageSchema, SearchFilter } from 'ews-javascript-api';
+import { startIntervals } from './intervals';
+import { initializeMcpRoutes } from './Services/mcp';
+import cors from 'cors';
 
 // 全局错误处理 - 防止服务器崩溃
 process.on('unhandledRejection', (reason, promise) => {
@@ -35,7 +36,17 @@ process.on('uncaughtException', (error) => {
 });
 
 const app = express();
-app.use(express.json());
+app.use(cors());
+
+// Exclude MCP messages endpoint from body parsing because SSEServerTransport handles the stream directly
+app.use((req, res, next) => {
+    if (req.path === '/api/mcp/messages') {
+        next();
+    } else {
+        express.json()(req, res, next);
+    }
+});
+
 const PORT = process.env.PORT || 3000;
 
 // 将在authenticateToken函数定义后配置API路由
@@ -188,9 +199,13 @@ function getCurrentWeekNumber(): number {
 
 // 身份验证中间件
 async function authenticateToken(req: any, res: any, next: any) {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
+    let token = req.headers.authorization && req.headers.authorization.split(' ')[1];
     
+    // 如果Header中没有token，尝试从query参数获取 (用于SSE等不支持Header的场景)
+    if (!token && req.query.token) {
+        token = req.query.token;
+    }
+
     if (!token) return res.status(401).json({ error: 'Access token required' });
     
     const decoded = verifyJwt(token);
@@ -216,6 +231,9 @@ async function authenticateToken(req: any, res: any, next: any) {
 // 配置API路由
 const apiRouter = initializeApiRoutes(authenticateToken);
 app.use('/api', apiRouter);
+
+// Initialize MCP Routes
+initializeMcpRoutes(app, authenticateToken);
 
 const pca = new msal.ConfidentialClientApplication(config);
 
@@ -433,411 +451,8 @@ async function startServer() {
 
 startServer();
 
-setInterval(async () => {
-    // 使用缓存中的用户
-    for (const user of userCache.values()) {
-        logger.info(`Processing user ${user.id},with ebridgeBinded:${user.ebridgeBinded},XJTLUPassword:${user.XJTLUPassword},timetableUrl:${user.timetableUrl}`);
-        if (user.JWTtoken) {
-            const decoded = verifyJwt(user.JWTtoken);
-            if (decoded && decoded.exp) {
-                const exp = decoded.exp as number;
-                if (exp * 1000 < Date.now()) {
-                    user.JWTtoken = '';
-                    logger.info(`JWT token expired for user ${user.id}`);
-                    // 更新数据库
-                    await dbService.updateUser(user);
-                }
-            }
-        }
-
-        if (user.JWTtoken && user.XJTLUPassword && !user.emsClient) {
-            const exchangeConfig = {
-                exchangeUrl: process.env.EXCHANGE_URL || "https://mail.xjtlu.edu.cn/EWS/Exchange.asmx",
-                username: user.email.split('@')[0],
-                password: user.XJTLUPassword,
-                domain: process.env.EXCHANGE_DOMAIN || "xjtlu.edu.cn",
-                openaiApiKey: process.env.OPENAI_API_KEY || "",
-                openaiModel: process.env.OPENAI_MODEL || 'deepseek-chat',  
-                MStoken: user.MStoken,
-            } as ExchangeConfig;
-
-            logger.info(`Lunching ExchangeClient for user ${user.id}, with ${JSON.stringify(exchangeConfig)}`);
-            
-            const emailClient = new ExchangeClient(exchangeConfig, user);
-            
-            try {
-                const events = await emailClient.getEvents(
-                    moment().subtract(1, 'day').toISOString(),
-                    moment().add(1, 'day').toISOString(),
-                );
-                
-                logger.info(`Fetched ${events.length} events for user ${user.id}`);
-                await logUserEvent(user.id, 'eventsFetched', `Fetched ${events.length} calendar events`, { count: events.length });
-                
-                // 检查并添加新事件
-                for (const event of events) {
-                    const existingTask = user.tasks.find(task => task.id === event.id);
-                    if (existingTask) continue;
-                    const newTask = {
-                        id: event.id || uuidv4(),
-                        name: event.subject,
-                        startTime: event.start,
-                        endTime: event.end,
-                        location: event.location || '',
-                        body: event.body || '',
-                        attendees: event.attendees || [],
-                        description: event.body || '',
-                        dueDate: event.end,
-                        completed: false,
-                        pushedToMSTodo: false,
-                    };
-                    try {
-                        await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive);
-                        broadcastTaskChange('created', newTask, user.id);
-                        // 增量刷新缓存：合并新创建的事件任务
-                        await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
-                        await logUserEvent(user.id, 'taskCreated', `Created task from calendar event: ${newTask.name}`, { id: newTask.id, source: 'Exchange', startTime: newTask.startTime, endTime: newTask.endTime });
-                    } catch (e:any) {
-                        if (e instanceof ScheduleConflictError) {
-                            logger.warn(`Skipped conflicting event task ${newTask.id} for user ${user.id}`);
-                            await logUserEvent(user.id, 'taskConflict', `Skipped conflicting calendar event: ${newTask.name}`, { id: newTask.id, startTime: newTask.startTime, endTime: newTask.endTime });
-                        } else {
-                            logger.error(`Failed to persist event task ${newTask.id} for user ${user.id}:`, e);
-                            await logUserEvent(user.id, 'taskError', `Failed to persist calendar event: ${newTask.name}`, { id: newTask.id, error: (e as any)?.message });
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error(`Failed to get events for user ${user.id}:`, error);
-                await logUserEvent(user.id, 'eventsError', `Failed to fetch calendar events`, { error: (error as any)?.message });
-            }
-            
-            // 仅在内存中保存客户端实例
-            user.emsClient = emailClient;
-        }
-
-        if (user.mailReadingSpan > 0 && user.emsClient) {
-            try {
-                logger.info(`Reading email for user ${user.id}, remaining span: ${user.mailReadingSpan}`);
-                // 获取收件箱中的邮件（限制为EMAIL_READ_LIMIT封，按接收时间倒序）
-                const emails = await user.emsClient.findEmails(Number(process.env.EMAIL_READ_LIMIT) || 30); 
-                // 提取最新一封邮件
-                const email = emails[user.mailReadingSpan - 1];
-                // 获取邮件完整内容（包括正文）
-                const fullEmail = await user.emsClient.getEmailById(email.id);
-                // 解析邮件内容
-                await user.emsClient.autoProcessNewEmail(fullEmail);
-                await logUserEvent(user.id, 'emailProcessed', `Processed email ${email.id}`, { emailId: email.id });
-                user.mailReadingSpan--;
-                await dbService.updateUser(user);
-                logger.info(`Decremented mailReadingSpan for user ${user.id}, new value: ${user.mailReadingSpan}`);
-            } catch (emailError) {
-                logger.error(`Failed to read email for user ${user.id}:`, emailError);
-                await logUserEvent(user.id, 'emailError', `Failed to process email`, { error: (emailError as any)?.message });
-            }
-        }
-        
-        for (const task of user.tasks) {
-            
-
-            if (!task.pushedToMSTodo) {
-                if (!user.MStoken) continue;
-                const msToken = user.MStoken;
-                const graphEndpoint = `https://graph.microsoft.com/v1.0/me/todo/lists`;
-                const headers = { Authorization: `Bearer ${msToken}`, 'Content-Type': 'application/json' };
-                
-                try {
-                    // 直接获取默认列表，不再创建新的列表
-                    const listsRes = await axios.get(graphEndpoint, { headers });
-                    
-                    // 尝试获取"我的一天"列表
-                    let targetList = listsRes.data.value.find((l: any) => l.wellknownName === 'myDay');
-                    
-                    // 如果没有找到"我的一天"列表，使用默认列表
-                    if (!targetList) {
-                        targetList = listsRes.data.value.find((l: any) => l.wellknownName === 'defaultList') || listsRes.data.value[0];
-                    }
-                    
-                    if (!targetList) throw new Error('No list found');
-                    
-                    // 直接将任务添加到目标列表
-                    await axios.post(`https://graph.microsoft.com/v1.0/me/todo/lists/${targetList.id}/tasks`, {
-                        title: task.name,
-                        body: { content: task.description || '', contentType: 'text' },
-                        dueDateTime: { dateTime: task.dueDate, timeZone: 'UTC' },
-                        startDateTime: task.startTime ? { dateTime: task.startTime, timeZone: 'UTC' } : undefined,
-                        reminderDateTime: task.startTime ? { dateTime: task.startTime, timeZone: 'UTC' } : undefined,
-                        importance: 'normal',
-                        status: task.completed ? 'completed' : 'notStarted'
-                    }, { headers });
-                    
-                    task.pushedToMSTodo = true;
-                    logger.success(`Pushed task ${task.id} to MS Todo`);
-                    
-                    // 更新数据库中的任务
-                    await dbService.updateTask(task);
-                    await logUserEvent(user.id, 'msTodoPushed', `Pushed task to MS To Do: ${task.name}`, { id: task.id });
-                } catch (error: any) {
-                    if (error.response?.status === 401) {
-                        logger.error(`MS Graph API 401 Unauthorized for task ${task.id}: Token may be expired or invalid`);
-                        // 可以选择清除用户的MS token，让用户重新授权
-                        // user.MStoken = null;
-                        // await dbService.updateUser(user);
-                    } else if (error.response?.status === 403) {
-                        logger.error(`MS Graph API 403 Forbidden for task ${task.id}: Insufficient permissions`);
-                    } else if (error.response?.status) {
-                        logger.error(`MS Graph API ${error.response.status} error for task ${task.id}:`, error.response.data || error.message);
-                    } else {
-                        logger.error(`Failed to push task ${task.id} to MS Todo:`, error.message || error);
-                        await logUserEvent(user.id, 'msTodoPushError', `Failed to push task to MS To Do: ${task.name}`, { id: task.id, error: error?.message, status: error?.response?.status });
-                    }
-                    // 继续处理其他任务，不中断整个流程
-                    continue;
-                }
-            }
-        }
-        if ((!user.timetableUrl)  && user.XJTLUPassword) {
-        if (user.XJTLUPassword) {
-        // 创建异步函数在后台执行
-        (async () => {
-          try {
-            // 使用python-shell执行Python脚本
-            const pythonScriptPath = './server/Services/ebEmulator/ebridge.py';
-            
-            logger.info(`Executing Python script to check Ebridge connection for user ${user.id}`);
-            
-            // 执行Python脚本并获取输出
-            const options = {
-              mode: "text",
-              pythonOptions: ['-u'], // 无缓冲输出
-              args: [user.XJTLUaccount, user.XJTLUPassword]
-            } as Options;
-            
-            const timetableUrl = await PythonShell.run(pythonScriptPath, options).then((results: string[]) => {
-                logger.info(`Python script output for user ${user.id}: ${results}`);
-                if (results && results.length > 0) {
-                  const output = results[0];
-                  if (output && output.startsWith('http')) {
-                    return output;
-                  } else {
-                    throw new Error(`Invalid timetable URL returned: ${output}`);
-                  }
-                } else {
-                  throw new Error('No output returned from Python script');
-                }
-              });
-            
-            // timetableUrl已验证有效
-            user.timetableUrl = timetableUrl;
-            user.ebridgeBinded = true;
-            // 更新数据库中的用户
-            await dbService.updateUser(user);
-
-            // 记录成功连接的信息到控制台
-            logger.success(`Successfully connected to Ebridge for user ${user.id}, timetable URL: ${timetableUrl}`);
-            
-          } catch (error) {
-            logger.error('Ebridge connection check failed:', error);
-          }
-        })();
-            }
-        }
-        if (user.ebridgeBinded && user.timetableUrl) {
-            // 检查是否需要重新获取时间表（仅当环境变量中的timetableFetchLevel大于用户存储的值时才重新获取）
-            const envFetchLevel = parseInt(process.env.timetableFetchLevel || '0');
-            const userFetchLevel = user.timetableFetchLevel || 0;
-            
-            if (envFetchLevel <= userFetchLevel) {
-                logger.info(`Skipping timetable fetch for user ${user.id}: env level (${envFetchLevel}) <= user level (${userFetchLevel})`);
-                return;
-            }
-            
-            try {
-                // 从timetableUrl中提取hash值
-                let hashMatch = user.timetableUrl.split('/');
-                hashMatch = hashMatch[5].split('?');
-                if (hashMatch && hashMatch[0]) {
-                    const hash = hashMatch[0];
-                    logger.info(`Extracted hash: ${JSON.stringify(hashMatch)}`);
-                    // 构建API请求URL
-                    const apiUrl = `https://timetableplus.xjtlu.edu.cn/ptapi/api/enrollment/hash/${hash}/activity?start=1&end=13`;
-                    logger.info(`Requesting URL: ${apiUrl}`);
-                    const response = await axios.get<TimetableActivity[]>(apiUrl);
-                    
-                    if (response.status === 200 && Array.isArray(response.data)) {
-                        logger.success(`Successfully fetched timetable data for user ${user.id}, found ${response.data.length} activities`);
-                        await logUserEvent(user.id, 'timetableFetched', `Fetched timetable activities: ${response.data.length}`, { count: response.data.length });
-                        
-                        // 更新用户的timetableFetchLevel为当前环境变量的值
-                        const envFetchLevel = parseInt(process.env.timetableFetchLevel || '0');
-                        user.timetableFetchLevel = envFetchLevel;
-                        await dbService.updateUser(user);
-                        logger.info(`Updated timetableFetchLevel for user ${user.id} to ${envFetchLevel}`);
-                        
-                        // 解析周次模式的辅助函数
-                        function parseWeekPattern(pattern: string): number[] {
-                            const weeks: number[] = [];
-                            if (!pattern) return weeks;
-                            
-                            // 处理类似 "1-3, 4-13" 这样的格式
-                            const ranges = pattern.split(',');
-                            for (const range of ranges) {
-                                const trimmedRange = range.trim();
-                                if (trimmedRange.includes('-')) {
-                                    const [start, end] = trimmedRange.split('-').map(Number);
-                                    for (let i = start; i <= end; i++) {
-                                        weeks.push(i);
-                                    }
-                                } else {
-                                    weeks.push(Number(trimmedRange));
-                                }
-                            }
-                            return weeks;
-                        }
-                        
-                        // 获取星期名称的辅助函数
-                        function getDayName(dayIndex: number): string {
-                            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                            return days[dayIndex] || 'Unknown';
-                        }
-                        
-                        // getCurrentWeekNumber function moved to global scope
-                        
-                        // 获取当前日期（今天的0点0分0秒）
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        
-                        // 计算下周结束的日期（今天 + 7天）
-                        const nextWeekEnd = new Date(today);
-                        nextWeekEnd.setDate(today.getDate() + 7);
-                        
-                        // 将响应转换为Task格式并添加给用户
-                        for (const activity of response.data) {
-                            try {
-                                // 解析活动的周次和星期
-                                const weeks = parseWeekPattern(activity.weekPattern || '');
-                                // API返回的scheduledDay是0-6，其中0=周一，需要转换为JavaScript的0-6（0=周日，6=周六）
-                                const apiDay = activity.scheduledDay ? parseInt(activity.scheduledDay) : 0;
-                                // 转换：apiDay 0=周一, 1=周二, 2=周三, 3=周四, 4=周五, 5=周六, 6=周日
-                                // JavaScript: 0=周日, 1=周一, 2=周二, 3=周三, 4=周四, 5=周五, 6=周六
-                                const scheduledDay = apiDay === 6 ? 0 : apiDay + 1;
-                                
-                                // 解析时间部分（不使用日期部分）
-                                const startTimeObj = activity.startTime ? new Date(activity.startTime) : new Date();
-                                const endTimeObj = activity.endTime ? new Date(activity.endTime) : new Date(Date.now() + 3600000);
-                                
-                                // 计算本周的目标日
-                                const currentDayOfWeek = today.getDay() ; // 0-6，0是周日
-                                
-                                // 计算本周的课程日期
-                                let thisWeekCourseDate = new Date(today);
-                                
-                                // 计算到本周该课程日的天数差
-                                const daysDifference = scheduledDay - currentDayOfWeek;
-                                
-                                // 如果课程日在本周且在今天之后
-                                if (daysDifference > 0) {
-                                    thisWeekCourseDate.setDate(today.getDate() + daysDifference);
-                                } 
-                                // 如果今天就是课程日
-                                else if (daysDifference === 0) {
-                                    // 保留今天
-                                } 
-                                // 如果课程日在本周且在今天之前
-                                else {
-                                    // 为了本周的课程日期，需要减去相应的天数（但不改变为下周）
-                                    thisWeekCourseDate.setDate(today.getDate() + daysDifference);
-                                }
-                                
-                                // 生成未来一周内的所有可能课程日期
-                                const potentialCourseDates: Date[] = [];
-                                
-                                // 添加本周的课程日期（如果在范围内）
-                                if (thisWeekCourseDate >= today && thisWeekCourseDate <= nextWeekEnd) {
-                                    potentialCourseDates.push(thisWeekCourseDate);
-                                }
-                                
-                                // 添加下周的课程日期（如果在范围内）
-                                const nextWeekCourseDate = new Date(thisWeekCourseDate);
-                                nextWeekCourseDate.setDate(thisWeekCourseDate.getDate() + 7);
-                                if (nextWeekCourseDate <= nextWeekEnd) {
-                                    potentialCourseDates.push(nextWeekCourseDate);
-                                }
-                                
-                                // 为每个潜在的课程日期创建任务
-                                for (const courseDate of potentialCourseDates) {
-                                    // 创建完整的课程时间
-                                    const courseStartTime = new Date(courseDate);
-                                    courseStartTime.setHours(startTimeObj.getHours(), startTimeObj.getMinutes(), startTimeObj.getSeconds());
-                                    
-                                    const courseEndTime = new Date(courseDate);
-                                    courseEndTime.setHours(endTimeObj.getHours(), endTimeObj.getMinutes(), endTimeObj.getSeconds());
-                                    
-                                    // 确保开始时间在未来
-                                    if (courseStartTime >= today) {
-                                        // 创建唯一的任务ID
-                                        const taskId = `timetable_${hash}_${activity.identity || uuidv4()}_${courseDate.toISOString().split('T')[0]}`;
-                                        
-                                        // 检查任务是否已存在
-                                        const existingTask = user.tasks.find(task => task.id === taskId);
-                                        if (!existingTask) {
-                                            // 获取当前周的周次信息
-                                            const currentWeekNumber = getCurrentWeekNumber();
-                                            
-                                            // 将时间表活动转换为任务格式
-                                            const newTask: Task = {
-                                                id: taskId,
-                                                name: activity.name || `${activity.moduleId || 'Unknown'} - ${activity.activityType || 'Activity'}`,
-                                                description: `Staff: ${activity.staff || 'Unknown'}\nLocation: ${activity.location || 'Online'}\nWeek Pattern: ${activity.weekPattern || 'N/A'}\nCurrent Week: ${currentWeekNumber}\nDay: ${getDayName(scheduledDay)}`,
-                                                dueDate: courseDate.toISOString(),
-                                                startTime: courseStartTime.toISOString(),
-                                                endTime: courseEndTime.toISOString(),
-                                                location: activity.location || undefined,
-                                                completed: false,
-                                                pushedToMSTodo: false,
-                                                body: JSON.stringify(activity),
-                                            };
-                                            
-                                            // 添加到用户任务列表
-                                            try {
-                                                await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive);
-                                                broadcastTaskChange('created', newTask, user.id);
-                                                await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
-                                                logger.info(`Added timetable task: ${newTask.name} on ${courseDate.toLocaleDateString()} (Week: ${currentWeekNumber}) for user ${user.id}`);
-                                                await logUserEvent(user.id, 'taskCreated', `Created timetable task ${newTask.name}`, { id: newTask.id, startTime: newTask.startTime, endTime: newTask.endTime });
-                                            } catch (e:any) {
-                                                if (e instanceof ScheduleConflictError) {
-                                                    logger.warn(`Skipped conflicting timetable task ${newTask.id} for user ${user.id}`);
-                                                    await logUserEvent(user.id, 'taskConflict', `Skipped conflicting timetable task ${newTask.name}`, { id: newTask.id });
-                                                } else {
-                                                    logger.error(`Failed to add timetable task ${newTask.id} for user ${user.id}:`, e);
-                                                    await logUserEvent(user.id, 'taskError', `Failed to add timetable task ${newTask.name}`, { id: newTask.id, error: (e as any)?.message });
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (parseError) {
-                                logger.error(`Error processing activity ${activity.identity || 'unknown'}:`, parseError);
-                                await logUserEvent(user.id, 'timetableParseError', `Failed to process timetable activity`, { activityId: activity.identity || 'unknown', error: (parseError as any)?.message });
-                            }
-                        }
-                    }else{
-                        logger.warn(`Failed to fetch timetable for user ${user.id}`);
-                        await logUserEvent(user.id, 'timetableError', `Failed to fetch timetable`, {});
-                    }
-                } else {
-                    logger.warn(`Failed to extract hash from timetableUrl for user ${user.id} `);
-                    await logUserEvent(user.id, 'timetableError', `Failed to extract timetable hash`, {});
-                }
-            } catch (error) {
-                logger.error(`Failed to process timetable for user ${user.id}:`, error);
-                await logUserEvent(user.id, 'timetableError', `Failed to process timetable`, { error: (error as any)?.message });
-            }
-        }
-    }
-    logger.info('Checked all users for Ebridge status');
-}, 20000);
+// 启动后台定时任务（抽离至 intervals.ts）
+startIntervals(() => userCache.values());
 
 export async function createTaskToUser(user: User, taskData: Task): Promise<void> {
     // 实现创建任务的逻辑
