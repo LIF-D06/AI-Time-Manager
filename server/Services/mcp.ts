@@ -7,6 +7,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../Utils/logger.js';
 import { z } from 'zod';
 import { IEvent } from './types';
+import { findConflictingTasks, TimeLikeTask } from './scheduleConflict';
+import { logUserEvent } from './userLog';
 
 // Store active transports: sessionId -> Transport
 const transports = new Map<string, SSEServerTransport>();
@@ -46,12 +48,12 @@ export const mcpTools = {
     },
     add_schedule: {
         name: "add_schedule",
-        description: "Add a new schedule/task",
+        description: "Add a new schedule/task based on the email content. You MUST extract the task name and time information.",
         schema: {
-            name: z.string().describe("Title of the task"),
-            startTime: z.string().optional().describe("Start time in ISO 8601 format. Defaults to now if not provided."),
-            endTime: z.string().optional().describe("End time in ISO 8601 format. Defaults to 1 hour after start time."),
-            description: z.string().optional().describe("Description of the task"),
+            name: z.string().describe("The title of the task, extracted from the email subject or content. MUST be provided."),
+            startTime: z.string().optional().describe("Start time in ISO 8601 format (e.g. 2023-10-01T09:00:00+08:00). If timezone is not specified in the email, assume China Standard Time (UTC+8)."),
+            endTime: z.string().optional().describe("End time in ISO 8601 format. If a duration is mentioned, calculate it. If a due date is mentioned, use that. Assume UTC+8 if not specified."),
+            description: z.string().optional().describe("Detailed description of the task, including any relevant content from the email body."),
             location: z.string().optional().describe("Location of the event"),
             type: z.enum(["meeting", "todo"]).optional().describe("Type of the schedule"),
             importance: z.enum(["high", "normal", "low"]).optional().describe("Importance of the task"),
@@ -60,6 +62,23 @@ export const mcpTools = {
         execute: async (args: { name: string, startTime?: string, endTime?: string, description?: string, location?: string, type?: string, importance?: 'high' | 'normal' | 'low', isReminderOn?: boolean }, user: User) => {
             let { name, startTime, endTime, description, location, importance, isReminderOn } = args;
             
+            if (!name) {
+                return { content: [{ type: "text" as const, text: "Error: Task name is required." }] };
+            }
+
+            // Helper to ensure timezone
+            const ensureTimezone = (timeStr: string) => {
+                if (!timeStr) return timeStr;
+                // Check if it has timezone info (Z or +HH:MM or -HH:MM)
+                if (!/Z|[+-]\d{2}:?\d{2}$/.test(timeStr)) {
+                    return `${timeStr}+08:00`;
+                }
+                return timeStr;
+            };
+
+            if (startTime) startTime = ensureTimezone(startTime);
+            if (endTime) endTime = ensureTimezone(endTime);
+
             // Default time logic
             if (!startTime) startTime = new Date().toISOString();
             if (!endTime) {
@@ -72,6 +91,39 @@ export const mcpTools = {
             const isValidDate = (d: string) => !isNaN(new Date(d).getTime());
             if (!isValidDate(startTime) || !isValidDate(endTime)) {
                 return { content: [{ type: "text" as const, text: `Error: Invalid date format. Start=${startTime}, End=${endTime}` }] };
+            }
+
+            // Check for conflicts
+            try {
+                // Fetch existing tasks in the time range
+                const { tasks: existingTasks } = await dbService.getTasksPage(user.id, {
+                    start: startTime,
+                    end: endTime,
+                    limit: 100
+                });
+
+                const candidate: TimeLikeTask = {
+                    id: 'new-task',
+                    startTime: startTime,
+                    endTime: endTime
+                };
+
+                const conflicts = findConflictingTasks(existingTasks, candidate, { boundaryConflict: !!user.conflictBoundaryInclusive });
+
+                if (conflicts.length > 0) {
+                    const conflictNames = conflicts.map(t => t.name).join(', ');
+                    const message = `Schedule conflict detected with: ${conflictNames}`;
+                    
+                    // Trigger user log event
+                    await logUserEvent(user.id, 'schedule_conflict', message, {
+                        candidate: { name, startTime, endTime },
+                        conflicts: conflicts
+                    });
+
+                    return { content: [{ type: "text" as const, text: `Task creation skipped due to conflict with: ${conflictNames}. A notification has been sent.` }] };
+                }
+            } catch (err) {
+                logger.error(`Error checking conflicts: ${err}`);
             }
 
             const newTask = {
@@ -201,7 +253,38 @@ export const mcpTools = {
         execute: async (args: any, user: User) => {
             return { content: [{ type: "text" as const, text: new Date().toISOString() }] };
         }
-    }
+    },
+    search_tasks: {
+        name: "search_tasks",
+        description: "Search for tasks with various filters",
+        schema: {
+            q: z.string().optional().describe("Fuzzy search query for task name or description"),
+            completed: z.boolean().optional().describe("Filter by completion status"),
+            startDate: z.string().optional().describe("Filter tasks ending after this date (ISO 8601)"),
+            endDate: z.string().optional().describe("Filter tasks starting before this date (ISO 8601)"),
+            limit: z.number().optional().describe("Max number of results (default 50)"),
+            offset: z.number().optional().describe("Pagination offset (default 0)"),
+            sortBy: z.enum(["startTime", "dueDate", "name", "endTime"]).optional().describe("Field to sort by"),
+            order: z.enum(["asc", "desc"]).optional().describe("Sort order")
+        },
+        execute: async (args: { q?: string, completed?: boolean, startDate?: string, endDate?: string, limit?: number, offset?: number, sortBy?: string, order?: 'asc' | 'desc' }, user: User) => {
+            try {
+                const { tasks, total } = await dbService.getTasksPage(user.id, {
+                    q: args.q,
+                    completed: args.completed,
+                    start: args.startDate,
+                    end: args.endDate,
+                    limit: args.limit,
+                    offset: args.offset,
+                    sortBy: args.sortBy,
+                    order: args.order
+                });
+                return { content: [{ type: "text" as const, text: JSON.stringify({ tasks, total }, null, 2) }] };
+            } catch (error: any) {
+                return { content: [{ type: "text" as const, text: `Error searching tasks: ${error.message}` }] };
+            }
+        }
+    },
 };
 
 export function initializeMcpRoutes(app: express.Application, authenticateToken: any) {
@@ -306,7 +389,9 @@ export function getOpenAITools() {
         // Helper to extract Zod schema details
         // Note: This is a simplified converter for the specific Zod schemas used here.
         // It may not cover all Zod features.
-        const shape = (tool.schema as any).shape;
+        // Handle both ZodObject (has .shape) and plain object definitions
+        const shape = (tool.schema as any).shape || tool.schema;
+        
         if (shape) {
             for (const paramName in shape) {
                 const zodSchema = shape[paramName];
@@ -349,5 +434,6 @@ export function getOpenAITools() {
             }
         });
     }
+    logger.data(`Generated OpenAI Tools: ${JSON.stringify(tools, null, 2)}`);
     return tools;
 }

@@ -25,6 +25,7 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
     endTime: format(new Date(), 'HH:mm'),
     dueDate: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
     location: '',
+    importance: 'normal' as 'high' | 'normal' | 'low',
   });
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,7 +33,7 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
   const [conflictTasks, setConflictTasks] = useState<Task[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setNewTask({ ...newTask, [name]: value });
   };
@@ -45,6 +46,7 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
       endTime: format(new Date(), 'HH:mm'),
       dueDate: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
       location: '',
+      importance: 'normal',
     });
     setFormError('');
     setTaskType('interval');
@@ -181,6 +183,7 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
           endTime: endTime.toISOString(),
           dueDate: endTime.toISOString(),
           pushedToMSTodo: false,
+          importance: newTask.importance,
         };
       } else { // point task
         const dueDate = new Date(newTask.dueDate);
@@ -192,6 +195,7 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
           endTime: dueDate.toISOString(),
           dueDate: dueDate.toISOString(),
           pushedToMSTodo: false,
+          importance: newTask.importance,
         };
       }
 
@@ -296,16 +300,45 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
                 onChange={handleInputChange}
                 required
               />
+              <div className="ui-input-wrapper" style={{ flex: 1 }}>
+                <label className="ui-label">重要性</label>
+                <select
+                  name="importance"
+                  value={newTask.importance}
+                  onChange={handleInputChange}
+                  className="ui-input"
+                >
+                  <option value="high">高</option>
+                  <option value="normal">中</option>
+                  <option value="low">低</option>
+                </select>
+              </div>
             </div>
           ) : (
-            <Input
-              label="截止日期"
-              name="dueDate"
-              type="datetime-local"
-              value={newTask.dueDate}
-              onChange={handleInputChange}
-              required
-            />
+            <div className="time-inputs">
+              <Input
+                label="截止日期"
+                name="dueDate"
+                type="datetime-local"
+                value={newTask.dueDate}
+                onChange={handleInputChange}
+                required
+                style={{ flex: 2 }}
+              />
+              <div className="ui-input-wrapper" style={{ flex: 1 }}>
+                <label className="ui-label">重要性</label>
+                <select
+                  name="importance"
+                  value={newTask.importance}
+                  onChange={handleInputChange}
+                  className="ui-input"
+                >
+                  <option value="high">高</option>
+                  <option value="normal">中</option>
+                  <option value="low">低</option>
+                </select>
+              </div>
+            </div>
           )}
         </div>
       </Modal>

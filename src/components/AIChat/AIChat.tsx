@@ -12,7 +12,28 @@ import '../../styles/AIChat.css';
 
 const AIChat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: '你好！我是你的日程助手。我可以帮你管理日程、查看邮件等。需要我帮你做什么尽管说出来吧！' }
+    { role: 'assistant', content: `我可以帮你做以下几类事情：
+
+## 📧 邮件管理
+- 查看最近的邮件内容
+
+## 📅 日程管理
+- 添加新的日程/任务
+- 查看特定时间范围内的日程安排
+- 更新现有的日程信息
+- 删除不需要的日程
+- 标记任务完成状态
+
+## ⏰ 时间相关
+- 获取当前服务器时间
+
+具体来说，我可以：
+- 从邮件中提取会议、任务信息并自动添加到日程
+- 帮你整理一周或一个月的日程安排
+- 设置提醒和任务优先级
+- 管理会议、待办事项等不同类型的日程
+
+你想让我帮你处理什么具体的事情呢？比如查看今天的日程，或者从邮件中提取重要信息添加到日历中？` }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);

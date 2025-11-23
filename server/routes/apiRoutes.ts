@@ -123,7 +123,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
   router.post('/tasks', authenticateToken, async (req: any, res: any) => {
     try {
       const user = req.user as User;
-      const { name, description, startTime, endTime, dueDate, location, boundaryConflict, recurrenceRule } = req.body || {};
+      const { name, description, startTime, endTime, dueDate, location, boundaryConflict, recurrenceRule, importance } = req.body || {};
       if (!name || !startTime || !endTime) {
         return res.status(400).json({ error: 'name, startTime, endTime required' });
       }
@@ -137,6 +137,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         location,
         completed: false,
         pushedToMSTodo: false,
+        importance: importance || 'normal',
       };
       const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
       if (recurrenceRule) task.recurrenceRule = JSON.stringify(recurrenceRule);
@@ -227,7 +228,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       const batchBoundary = boundaryConflict !== undefined ? !!boundaryConflict : undefined;
 
       for (const input of tasks) {
-        const { name, description, startTime, endTime, dueDate, location, recurrenceRule } = input || {};
+        const { name, description, startTime, endTime, dueDate, location, recurrenceRule, importance } = input || {};
         if (!name || !startTime || !endTime) {
           results.push({ input, status: 'error', errorMessage: 'name, startTime, endTime required' });
           errors++;
@@ -244,6 +245,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
           location,
           completed: false,
           pushedToMSTodo: false,
+          importance: importance || 'normal',
         };
         if (recurrenceRule) task.recurrenceRule = JSON.stringify(recurrenceRule);
           try {
@@ -328,7 +330,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       const taskId = req.params.id;
       const existing = user.tasks.find(t => t.id === taskId);
       if (!existing) return res.status(404).json({ error: 'task not found' });
-      const { name, description, startTime, endTime, dueDate, location, completed, boundaryConflict } = req.body || {};
+      const { name, description, startTime, endTime, dueDate, location, completed, boundaryConflict, importance } = req.body || {};
 
       // 构建更新后的任务对象（不直接修改原对象，先复制）
       const updated: Task = {
@@ -340,12 +342,13 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         dueDate: dueDate !== undefined ? dueDate : existing.dueDate,
         location: location !== undefined ? location : existing.location,
         completed: completed !== undefined ? !!completed : existing.completed,
+        importance: importance !== undefined ? importance : existing.importance,
       };
       try {
         const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
         await dbService.updateTask(updated, effectiveBoundary);
         broadcastTaskChange('updated', updated, user.id);
-        await logUserEvent(user.id, 'taskUpdated', `Updated task ${updated.name}`, { id: updated.id, changes: { name, description, startTime, endTime, dueDate, location, completed } });
+        await logUserEvent(user.id, 'taskUpdated', `Updated task ${updated.name}`, { id: updated.id, changes: { name, description, startTime, endTime, dueDate, location, completed, importance } });
         if (completed === true && !existing.completed) {
           broadcastTaskChange('completed', updated, user.id);
           await logUserEvent(user.id, 'taskCompleted', `Completed task ${updated.name}`, { id: updated.id });

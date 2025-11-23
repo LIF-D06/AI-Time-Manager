@@ -51,6 +51,7 @@ export class ExchangeClient {
     private healthCheckTimer: NodeJS.Timeout | null = null;
     private llmApi: LLMApi | null = null;
     private user: User | null = null;
+    private processedMessageIds: Set<string> = new Set();
 
     constructor(config: ExchangeConfig, user: User) {
         this.config = config;
@@ -249,14 +250,26 @@ export class ExchangeClient {
         // 这里可以根据事件类型进行处理
         for (const event of events) {
             if (event.EventType === EventType.NewMail || event.EventType === EventType.Created) {
-                logger.exchange('收到新邮件通知，正在处理...');
                 
                 // 对于每个通知，获取相关的项目ID
                 if (event.ItemId) {
+                    const uniqueId = event.ItemId.UniqueId;
+
+                    // 检查是否最近已处理过
+                    if (this.processedMessageIds.has(uniqueId)) {
+                        logger.exchange(`跳过已处理的消息ID: ${uniqueId}`);
+                        continue;
+                    }
+
+                    // 添加到已处理集合，并设置过期清理
+                    this.processedMessageIds.add(uniqueId);
+                    setTimeout(() => this.processedMessageIds.delete(uniqueId), 5 * 60 * 1000); // 5分钟后过期
+
+                    logger.exchange('收到新邮件通知，正在处理...');
                     logger.exchange(`正在处理项目ID: ${JSON.stringify(event.ItemId)}`);
                     try {
                         // 创建ItemId对象
-                        const itemId = new ItemId(event.ItemId.UniqueId);
+                        const itemId = new ItemId(uniqueId);
                         
                         // 首先尝试作为邮件处理
                         const propSet = new PropertySet(BasePropertySet.FirstClassProperties, [ItemSchema.Body]);
@@ -273,7 +286,7 @@ export class ExchangeClient {
                     } catch (error: any) {
                         // 如果不是邮件，可能是日历事件
                         try {
-                            await this.handleCalendarEvent(event.ItemId.UniqueId);
+                            await this.handleCalendarEvent(uniqueId);
                         } catch (calendarError: any) {
                             logger.error(`处理项目时出错（邮件/日历）: ${error.message || '未知错误'}`);
                         }
@@ -452,12 +465,21 @@ export class ExchangeClient {
             return;
         }
 
+        // 确保 args 存在
+        const safeArgs = args || {};
+
+        // 如果没有提供任务名称，使用邮件主题作为默认名称
+        if (!safeArgs.name) {
+            logger.warn(`LLM 未提供任务名称，使用邮件主题作为默认名称: ${email.subject}`);
+            safeArgs.name = email.subject || '未命名任务';
+        }
+
         // 清理邮件正文内容
         const cleanedEmailBody = this.cleanHtmlContent(email.body || '');
-        const description = args.description ? `${args.description}\n\n来自邮件: ${email.subject}\n\n${cleanedEmailBody}` : `来自邮件: ${email.subject}\n\n${cleanedEmailBody}`;
+        const description = safeArgs.description ? `${safeArgs.description}\n\n来自邮件: ${email.subject}\n\n${cleanedEmailBody}` : `来自邮件: ${email.subject}\n\n${cleanedEmailBody}`;
 
         const toolArgs = {
-            ...args,
+            ...safeArgs,
             description
         };
 
@@ -630,19 +652,19 @@ export class ExchangeClient {
         try {
             // 移除HTML标签但保留文本内容
             let cleaned = htmlContent
-                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // 移除script标签
-                .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '') // 移除style标签
-                .replace(/<meta\b[^>]*>/gi, '') // 移除meta标签
-                .replace(/<head\b[^<]*(?:(?!<\/head>)<[^<]*)*<\/head>/gi, '') // 移除head标签
-                .replace(/<html\b[^<]*(?:(?!<\/html>)<[^<]*)*<\/html>/gi, '') // 移除html标签
-                .replace(/<body\b[^<]*(?:(?!<\/body>)<[^<]*)*<\/body>/gi, '') // 移除body标签
-                .replace(/<\/?[^>]+(>|$)/g, '') // 移除所有其他HTML标签
-                .replace(/&nbsp;/g, ' ') // 替换HTML空格
-                .replace(/&lt;/g, '<') // 替换HTML小于号
-                .replace(/&gt;/g, '>') // 替换HTML大于号
-                .replace(/&amp;/g, '&') // 替换HTML和号
-                .replace(/&quot;/g, '"') // 替换HTML引号
-                .replace(/&#39;/g, "'") // 替换HTML单引号
+                // 移除script, style, head标签及其内容
+                .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+                .replace(/<style\b[\s\S]*?<\/style>/gi, '')
+                .replace(/<head\b[\s\S]*?<\/head>/gi, '')
+                // 移除所有其他HTML标签
+                .replace(/<[^>]+>/g, ' ')
+                // 替换常见HTML实体
+                .replace(/&nbsp;/g, ' ')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&amp;/g, '&')
+                .replace(/&quot;/g, '"')
+                .replace(/&#39;/g, "'")
                 .trim();
             
             // 移除多余的空白字符

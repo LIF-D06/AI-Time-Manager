@@ -187,8 +187,8 @@ export interface LogsResponse {
 
 export const getLogs = async (params?: { limit?: number; offset?: number; type?: string; since?: string; until?: string }): Promise<LogsResponse> => {
   const queryParams = new URLSearchParams();
-  if (params?.limit) queryParams.append('limit', params.limit.toString());
-  if (params?.offset) queryParams.append('offset', params.offset.toString());
+  if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+  if (params?.offset !== undefined) queryParams.append('offset', params.offset.toString());
   if (params?.type) queryParams.append('type', params.type);
   if (params?.since) queryParams.append('since', params.since);
   if (params?.until) queryParams.append('until', params.until);
@@ -221,6 +221,7 @@ export interface Task {
   pushedToMSTodo: boolean;
   recurrenceRule?: string;
   parentTaskId?: string;
+  importance?: 'high' | 'normal' | 'low';
 }
 
 export interface TasksResponse {
@@ -331,14 +332,19 @@ export const createTasksBatch = async (tasks: Omit<Task, 'id' | 'completed'>[], 
   return await response.json();
 };
 
-export const getTasks = async (params: { start: string; end: string; limit?: number }): Promise<TasksResponse> => {
+export const getTasks = async (params: { start?: string; end?: string; limit?: number; q?: string; completed?: boolean; offset?: number; sortBy?: string; order?: 'asc' | 'desc' }): Promise<TasksResponse> => {
   const token = getToken();
   if (!token) throw new Error('用户未登录');
 
   const queryParams = new URLSearchParams();
-  queryParams.append('start', params.start);
-  queryParams.append('end', params.end);
+  if (params.start) queryParams.append('start', params.start);
+  if (params.end) queryParams.append('end', params.end);
   if (params.limit) queryParams.append('limit', params.limit.toString());
+  if (params.q) queryParams.append('q', params.q);
+  if (params.completed !== undefined) queryParams.append('completed', params.completed.toString());
+  if (params.offset) queryParams.append('offset', params.offset.toString());
+  if (params.sortBy) queryParams.append('sortBy', params.sortBy);
+  if (params.order) queryParams.append('order', params.order);
 
   const response = await customFetch(`/api/tasks?${queryParams.toString()}`, {
     method: 'GET',

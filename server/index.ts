@@ -11,7 +11,7 @@ import { initializeApiRoutes } from './routes/apiRoutes';
 import { Options, PythonShell } from 'python-shell';
 import { ExchangeConfig, TimetableActivity } from './Services/types';
 import { ScheduleConflictError } from './Services/scheduleConflict';
-import { initWebSocket, broadcastTaskChange } from './Services/websocket';
+import { initWebSocket, broadcastTaskChange, broadcastUserLog } from './Services/websocket';
 import { logUserEvent } from './Services/userLog';
 import { logger } from './Utils/logger.js';
 import { EmailMessageSchema, SearchFilter } from 'ews-javascript-api';
@@ -431,6 +431,9 @@ async function startServer() {
         // 初始化数据库
         await dbService.initialize();
         
+        // 设置日志监听器
+        dbService.setLogListener(broadcastUserLog);
+
         // 从数据库加载所有用户到缓存
         const users = await dbService.getAllUsers();
         users.forEach(user => {

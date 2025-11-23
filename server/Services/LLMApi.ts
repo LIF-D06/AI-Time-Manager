@@ -77,26 +77,34 @@ export class LLMApi {
                 },
             ];
 
-            const response = await this.openai.chat.completions.create({
-                model: this.model,
-                messages: [
-                    {
-                        role: 'system',
+            const messages = [
+                {
+                    role: 'system',
                         content: `你是一个从邮件中提取日程信息专业的邮件分析助手。现在是 ${new Date().toISOString()}。
 请分析邮件内容，并调用适当的工具来处理。
 - 如果邮件包含会议、待办事项、截止日期或任何需要安排时间的内容，请调用 'add_schedule'。
+- 你必须从邮件中提取任务名称(name)、开始时间(startTime)和结束时间(endTime)。
+- 如果邮件中只提到截止日期(Due date)，请将开始时间和结束时间设置为同一时间。
 - 如果邮件仅包含信息通知，不需要采取行动，请调用 'log_info'。
 - 确保提取的时间格式为 ISO 8601。`
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ];
+
+            logger.data(`[LLM Request] Messages: ${JSON.stringify(messages, null, 2)}`);
+
+            const response = await this.openai.chat.completions.create({
+                model: this.model,
+                messages: messages as any,
                 tools: tools as any,
-                tool_choice: "auto",
+                tool_choice: "required",
                 temperature: 0.3,
             });
+
+            logger.data(`[LLM Response]: ${JSON.stringify(response, null, 2)}`);
 
             const message = response.choices[0].message;
             
@@ -146,7 +154,15 @@ export class LLMApi {
      * 生成邮件处理提示词
      */
     private generateEmailProcessingPrompt(email: IEmail): string {
-        const emailContent = email.body || '';
+        // 简单的HTML清理，确保LLM能更好地理解内容
+        let emailContent = email.body || '';
+        // 移除script/style/head块
+        emailContent = emailContent.replace(/<(script|style|head)\b[\s\S]*?<\/\1>/gi, '');
+        // 移除标签
+        emailContent = emailContent.replace(/<[^>]+>/g, ' ');
+        // 压缩空白
+        emailContent = emailContent.replace(/\s+/g, ' ').trim();
+
         const emailSubject = email.subject || '';
         const from = email.from?.name || email.from?.address || '未知发件人';
 
@@ -168,6 +184,8 @@ export class LLMApi {
      */
     async chatStream(messages: any[], tools: any[] | undefined, onData: (data: { content?: string, tool_calls?: any[] }) => void): Promise<void> {
         try {
+            logger.data(`[LLM Stream Request] Messages: ${JSON.stringify(messages, null, 2)}`);
+            
             const stream = await this.openai.chat.completions.create({
                 model: this.model,
                 messages: messages,

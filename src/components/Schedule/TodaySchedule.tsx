@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { getTasks, type Task, updateTask } from '../../services/api';
-import { format, startOfDay, endOfDay, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Calendar, Clock, MapPin, CheckCircle2, Circle, Plus } from 'lucide-react';
+import { Calendar, Clock, MapPin, CheckCircle2, Circle, Plus, RefreshCw } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Button } from '../ui/Button';
 import AddTaskModal from './AddTaskModal';
@@ -23,9 +23,16 @@ const TodaySchedule: React.FC = () => {
     setLoading(true);
     try {
       const today = new Date();
-      const start = startOfDay(today).toISOString();
-      const end = endOfDay(today).toISOString();
-      const response = await getTasks({ start, end, limit: 100 });
+      // 获取本地当天的 00:00:00 和 23:59:59
+      const start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+      const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+      
+      // 打印本地时间和 UTC 查询时间，方便调试
+      console.log(`Fetching today's tasks (Local): ${format(start, 'yyyy-MM-dd HH:mm:ss')} to ${format(end, 'yyyy-MM-dd HH:mm:ss')}`);
+      console.log(`Fetching today's tasks (UTC): ${start.toISOString()} to ${end.toISOString()}`);
+      
+      const response = await getTasks({ start: start.toISOString(), end: end.toISOString(), limit: 500 });
+      console.log(`Fetched ${response.tasks.length} tasks for today`);
       setTasks(response.tasks);
     } catch (error) {
       console.error('Failed to fetch tasks', error);
@@ -82,6 +89,9 @@ const TodaySchedule: React.FC = () => {
             <p className="date-subtitle">{format(new Date(), 'yyyy年MM月dd日 EEEE', { locale: zhCN })}</p>
           </div>
           <div className="header-right">
+            <Button variant="ghost" size="sm" onClick={fetchTodayTasks} title="刷新日程">
+              <RefreshCw size={18} />
+            </Button>
             <Button onClick={() => setIsModalOpen(true)}>
               <Plus size={18} /> 添加日程
             </Button>

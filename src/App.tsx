@@ -68,6 +68,10 @@ function App() {
             element={isAuth ? <Dashboard onLogout={handleLogout} view="all-schedule" /> : <Navigate to="/login" />} 
           />
           <Route 
+            path="/schedule/search" 
+            element={isAuth ? <Dashboard onLogout={handleLogout} view="search-schedule" /> : <Navigate to="/login" />} 
+          />
+          <Route 
             path="/chat" 
             element={isAuth ? <Dashboard onLogout={handleLogout} view="chat" /> : <Navigate to="/login" />} 
           />

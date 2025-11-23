@@ -315,3 +315,20 @@
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
 }
+
+/* Toggle Button Component */
+.ui-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.ui-toggle-btn.toggled {
+  color: var(--color-success);
+  background-color: var(--color-success-bg);
+}

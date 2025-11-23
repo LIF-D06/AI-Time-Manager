@@ -17,9 +17,11 @@ import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
 import AllSchedule from './Schedule/AllSchedule';
 import TodaySchedule from './Schedule/TodaySchedule';
+import SearchTasks from './Schedule/SearchTasks';
 import LogViewer from './Logs/LogViewer';
 import AIChat from './AIChat/AIChat';
-import { LayoutDashboard, Calendar, ListTodo, FileText, LogOut, MessageSquare, ChevronsLeft, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Calendar, ListTodo, FileText, LogOut, MessageSquare, PanelLeftClose, PanelLeftOpen, Menu, X, Search } from 'lucide-react';
+import { ToggleButton } from './ui/ToggleButton';
 import '../styles/Dashboard.css';
 
 interface DashboardProps {
@@ -222,6 +224,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
   const renderMainContent = () => {
     if (view === 'all-schedule') return <AllSchedule />;
     if (view === 'today-schedule') return <TodaySchedule />;
+    if (view === 'search-schedule') return <SearchTasks />;
     if (view === 'logs') return <LogViewer />;
     if (view === 'chat') return <AIChat />;
     
@@ -338,6 +341,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
         <Calendar size={20} /> <span className="nav-text">全部日程</span>
       </button>
       <button 
+        className={`nav-item ${view === 'search-schedule' ? 'active' : ''}`}
+        onClick={() => handleNavClick('/schedule/search')}
+      >
+        <Search size={20} /> <span className="nav-text">搜索任务</span>
+      </button>
+      <button 
         className={`nav-item ${view === 'chat' ? 'active' : ''}`}
         onClick={() => handleNavClick('/chat')}
       >
@@ -378,9 +387,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
         <aside className="sidebar">
           <div className="sidebar-header">
             <h1 className="logo-text">时间锚</h1>
-            <button className="sidebar-toggle" onClick={toggleSidebar}>
-              <ChevronsLeft size={20} />
-            </button>
+            <ToggleButton
+              isToggled={isSidebarCollapsed}
+              onToggle={toggleSidebar}
+              toggledIcon={<PanelLeftOpen size={20} />}
+              untoggledIcon={<PanelLeftClose size={20} />}
+              toggledClassName=""
+            />
           </div>
           <nav className="sidebar-nav">
             {renderNavItems()}

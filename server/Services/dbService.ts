@@ -7,6 +7,11 @@ import { assertNoConflict } from './scheduleConflict';
 
 class DatabaseService {
     private db: Database | null = null;
+    private onLogAdded: ((userId: string, log: any) => void) | null = null;
+
+    public setLogListener(listener: (userId: string, log: any) => void) {
+        this.onLogAdded = listener;
+    }
     
     async initialize() {
         try {
@@ -86,6 +91,7 @@ class DatabaseService {
             // tasks 表新增列（迁移场景）
             try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN recurrenceRule TEXT;`); } catch (e) { logger.info('recurrenceRule column exists or error:', (e as Error).message); }
             try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN parentTaskId TEXT;`); } catch (e) { logger.info('parentTaskId column exists or error:', (e as Error).message); }
+            try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN importance TEXT DEFAULT 'normal';`); } catch (e) { logger.info('importance column exists or error:', (e as Error).message); }
             
             // 创建任务表
             await this.db.exec(`
@@ -104,6 +110,7 @@ class DatabaseService {
                     attendees TEXT,
                     recurrenceRule TEXT,
                     parentTaskId TEXT,
+                    importance TEXT DEFAULT 'normal',
                     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
@@ -139,7 +146,14 @@ class DatabaseService {
             [id, userId, type, message, payloadStr]
         );
         const row: any = await this.db.get(`SELECT * FROM user_logs WHERE id = ?`, [id]);
-        return { id: row.id, time: row.time, type: row.type, message: row.message, payload: row.payload ? JSON.parse(row.payload) : undefined };
+        const logEntry = { id: row.id, time: row.time, type: row.type, message: row.message, payload: row.payload ? JSON.parse(row.payload) : undefined };
+        
+        // Notify listener
+        if (this.onLogAdded) {
+            this.onLogAdded(userId, logEntry);
+        }
+        
+        return logEntry;
     }
 
     async getUserLogsPage(userId: string, opts?: { limit?: number; offset?: number; since?: string; until?: string; type?: string }): Promise<{ logs: Array<{ id: string; time: string; type: string; message: string; payload?: any }>; total: number }> {
@@ -244,12 +258,14 @@ class DatabaseService {
         await this.db.run(
             `INSERT INTO tasks 
              (id, userId, name, description, dueDate, startTime, endTime, 
-              location, completed, pushedToMSTodo, body, attendees, recurrenceRule, parentTaskId) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              location, completed, pushedToMSTodo, body, attendees, recurrenceRule, parentTaskId, importance) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [task.id, userId, task.name, task.description, task.dueDate, 
              task.startTime, task.endTime, task.location, task.completed ? 1 : 0, 
-              task.pushedToMSTodo ? 1 : 0, task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null]
+              task.pushedToMSTodo ? 1 : 0, task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.importance || 'normal']
         );
+        
+        await this.addUserLog(userId, 'task_created', `Created task ${task.name}`, { taskId: task.id, name: task.name });
     }
     
     async updateTask(task: Task, boundaryConflict?: boolean): Promise<void> {
@@ -265,12 +281,12 @@ class DatabaseService {
         await this.db.run(
             `UPDATE tasks 
              SET name = ?, description = ?, dueDate = ?, startTime = ?, endTime = ?, 
-                 location = ?, completed = ?, pushedToMSTodo = ?, body = ?, attendees = ?, recurrenceRule = ?, parentTaskId = ?, 
+                 location = ?, completed = ?, pushedToMSTodo = ?, body = ?, attendees = ?, recurrenceRule = ?, parentTaskId = ?, importance = ?,
                  updatedAt = CURRENT_TIMESTAMP
              WHERE id = ?`,
             [task.name, task.description, task.dueDate, task.startTime, task.endTime, 
               task.location, task.completed ? 1 : 0, task.pushedToMSTodo ? 1 : 0, 
-              task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.id]
+              task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.importance || 'normal', task.id]
         );
     }
 
@@ -303,6 +319,8 @@ class DatabaseService {
         const sql = `UPDATE tasks SET ${setClauses}, updatedAt = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?`;
         await this.db.run(sql, [...values, taskId, userId]);
 
+        await this.addUserLog(userId, 'task_updated', `Updated task ${taskId}`, { taskId, updates });
+
         return await this.getTaskById(taskId) as Task;
     }
     
@@ -327,7 +345,8 @@ class DatabaseService {
             body: row.body,
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
-            parentTaskId: row.parentTaskId || undefined
+            parentTaskId: row.parentTaskId || undefined,
+            importance: row.importance || 'normal'
         }));
     }
 
@@ -391,7 +410,8 @@ class DatabaseService {
             body: row.body,
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
-            parentTaskId: row.parentTaskId || undefined
+            parentTaskId: row.parentTaskId || undefined,
+            importance: row.importance || 'normal'
         } as Task));
 
         return { tasks, total };
@@ -427,7 +447,8 @@ class DatabaseService {
             body: row.body,
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
-            parentTaskId: row.parentTaskId || undefined
+            parentTaskId: row.parentTaskId || undefined,
+            importance: row.importance || 'normal'
         } as Task));
 
         return { occurrences, total };
@@ -461,7 +482,8 @@ class DatabaseService {
             body: row.body,
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
-            parentTaskId: row.parentTaskId || undefined
+            parentTaskId: row.parentTaskId || undefined,
+            importance: row.importance || 'normal'
         } as Task));
     }
 
@@ -513,14 +535,26 @@ class DatabaseService {
             body: row.body,
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
-            parentTaskId: row.parentTaskId || undefined
+            parentTaskId: row.parentTaskId || undefined,
+            importance: row.importance || 'normal'
         } as Task;
     }
 
     async deleteTask(id: string): Promise<boolean> {
         if (!this.db) throw new Error('Database not initialized');
+        
+        // Get userId for logging before deletion
+        const row = await this.db.get('SELECT userId FROM tasks WHERE id = ?', [id]);
+        const userId = row ? row.userId : null;
+
         const result: any = await this.db.run('DELETE FROM tasks WHERE id = ?', [id]);
-        return (result?.changes || 0) > 0;
+        const success = (result?.changes || 0) > 0;
+
+        if (success && userId) {
+            await this.addUserLog(userId, 'task_deleted', `Deleted task ${id}`, { taskId: id });
+        }
+
+        return success;
     }
     
     private mapRowToUser(row: any, tasks: Task[]): User {

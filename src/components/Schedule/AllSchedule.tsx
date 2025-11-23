@@ -89,7 +89,7 @@ const AllSchedule: React.FC = () => {
               {dayTasks.map(task => (
                 <div 
                   key={task.id} 
-                  className="mini-task" 
+                  className={`mini-task importance-${task.importance || 'normal'} ${task.completed ? 'task-completed' : ''}`}
                   title={task.name}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -98,7 +98,7 @@ const AllSchedule: React.FC = () => {
                 >
                   <span className="task-dot"></span>
                   <div className="task-info">
-                    {viewMode === 'week' && <span className="task-time">{format(parseISO(task.startTime), 'HH:mm')}</span>}
+                    <span className="task-time">{format(parseISO(task.startTime), 'HH:mm')}</span>
                     <span className="task-name">{task.name}</span>
                   </div>
                 </div>

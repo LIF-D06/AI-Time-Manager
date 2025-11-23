@@ -5,6 +5,7 @@ import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
+import { ToggleButton } from '../ui/ToggleButton';
 import { Trash2, CheckCircle2, Circle, MapPin, Clock } from 'lucide-react';
 import '../../styles/Schedule.css';
 
@@ -33,6 +34,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClose, task
         startTime: task.startTime,
         endTime: task.endTime,
         completed: task.completed,
+        importance: task.importance || 'normal',
       });
       setIsEditing(false);
       setError('');
@@ -41,7 +43,7 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClose, task
 
   if (!task) return null;
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setEditedTask(prev => ({ ...prev, [name]: value }));
   };
@@ -156,20 +158,31 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClose, task
                 <h2 className={`task-title ${task.completed ? 'completed' : ''}`}>
                   {task.name}
                 </h2>
-                <Button 
-                  variant="ghost" 
-                  className={`status-btn ${task.completed ? 'completed' : ''}`}
-                  onClick={handleToggleComplete}
+                <ToggleButton
+                  isToggled={task.completed}
+                  onToggle={handleToggleComplete}
+                  toggledIcon={<CheckCircle2 size={20} />}
+                  untoggledIcon={<Circle size={20} />}
+                  toggledText="已完成"
+                  untoggledText="未完成"
                   disabled={isSubmitting}
-                >
-                  {task.completed ? (
-                    <><CheckCircle2 size={20} /> 已完成</>
-                  ) : (
-                    <><Circle size={20} /> 未完成</>
-                  )}
-                </Button>
+                />
               </div>
               
+              <div className="detail-row">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: task.importance === 'high' ? '#ef4444' : task.importance === 'low' ? '#10b981' : '#3b82f6'
+                  }} />
+                  <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
+                    {task.importance === 'high' ? '高优先级' : task.importance === 'low' ? '低优先级' : '普通优先级'}
+                  </span>
+                </div>
+              </div>
+
               <div className="detail-row">
                 <Clock size={16} className="detail-icon" />
                 <span>
@@ -200,6 +213,20 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClose, task
                 required
               />
               
+              <div className="ui-input-wrapper">
+                <label className="ui-label">重要性</label>
+                <select
+                  name="importance"
+                  value={editedTask.importance}
+                  onChange={handleInputChange}
+                  className="ui-input"
+                >
+                  <option value="high">高</option>
+                  <option value="normal">中</option>
+                  <option value="low">低</option>
+                </select>
+              </div>
+
               <div className="time-inputs">
                 <Input
                   label="开始时间"
