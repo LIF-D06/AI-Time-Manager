@@ -6,6 +6,7 @@ import { Calendar, Clock, MapPin, CheckCircle2, Circle, Plus } from 'lucide-reac
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Button } from '../ui/Button';
 import AddTaskModal from './AddTaskModal';
+import TaskDetailModal from './TaskDetailModal';
 import { Modal } from '../ui/Modal';
 import CurrentTimeDisplay from '../ui/CurrentTimeDisplay';
 import '../../styles/Schedule.css';
@@ -14,6 +15,7 @@ const TodaySchedule: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskToComplete, setTaskToComplete] = useState<Task | null>(null);
   const [isCompleting, setIsCompleting] = useState(false);
 
@@ -48,25 +50,23 @@ const TodaySchedule: React.FC = () => {
   };
 
   const handleOpenCompleteModal = (task: Task) => {
-    if (!task.completed) {
-      setTaskToComplete(task);
-    }
+    setTaskToComplete(task);
   };
 
   const handleCloseCompleteModal = () => {
     setTaskToComplete(null);
   };
 
-  const handleCompleteTask = async () => {
+  const handleToggleTaskStatus = async () => {
     if (!taskToComplete) return;
 
     setIsCompleting(true);
     try {
-      await updateTask(taskToComplete.id, { completed: true });
+      await updateTask(taskToComplete.id, { completed: !taskToComplete.completed });
       await fetchTodayTasks(); // Refresh the tasks list
       handleCloseCompleteModal();
     } catch (error) {
-      console.error('Failed to complete task', error);
+      console.error('Failed to update task status', error);
       // Optionally, show an error message to the user
     } finally {
       setIsCompleting(false);
@@ -111,15 +111,26 @@ const TodaySchedule: React.FC = () => {
                     </span>
                   </div>
                   <div className="content-column">
-                    <div className="task-card">
+                    <div className="task-card" onClick={() => setSelectedTask(task)} style={{ cursor: 'pointer' }}>
                       <div className="task-header">
                         <h3>{task.name}</h3>
                         {task.completed ? (
-                          <CheckCircle2 className="icon-completed" />
+                          <CheckCircle2 
+                            className="icon-completed" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenCompleteModal(task);
+                            }}
+                            style={{ cursor: 'pointer' }}
+                          />
                         ) : (
                           <Circle
                             className="icon-pending"
-                            onClick={() => handleOpenCompleteModal(task)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenCompleteModal(task);
+                            }}
+                            style={{ cursor: 'pointer' }}
                           />
                         )}
                       </div>
@@ -149,19 +160,26 @@ const TodaySchedule: React.FC = () => {
         onTaskCreated={fetchTodayTasks}
       />
 
+      <TaskDetailModal
+        isOpen={!!selectedTask}
+        onClose={() => setSelectedTask(null)}
+        task={selectedTask}
+        onTaskUpdated={fetchTodayTasks}
+      />
+
       {taskToComplete && (
         <Modal
           isOpen={!!taskToComplete}
           onClose={handleCloseCompleteModal}
-          title="确认完成日程"
+          title={taskToComplete.completed ? "确认重置日程" : "确认完成日程"}
         >
-          <p>您确定要将日程 “{taskToComplete.name}” 标记为完成吗？</p>
+          <p>您确定要将日程 “{taskToComplete.name}” 标记为{taskToComplete.completed ? "未完成" : "完成"}吗？</p>
           <div className="modal-actions">
             <Button variant="outline" onClick={handleCloseCompleteModal} disabled={isCompleting}>
               取消
             </Button>
-            <Button onClick={handleCompleteTask} disabled={isCompleting}>
-              {isCompleting ? '标记中...' : '确认完成'}
+            <Button onClick={handleToggleTaskStatus} disabled={isCompleting}>
+              {isCompleting ? '处理中...' : (taskToComplete.completed ? '确认重置' : '确认完成')}
             </Button>
           </div>
         </Modal>

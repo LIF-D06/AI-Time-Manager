@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, List, Plus } from 
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Button } from '../ui/Button';
 import AddTaskModal from './AddTaskModal';
+import TaskDetailModal from './TaskDetailModal';
 import '../../styles/Schedule.css';
 
 const AllSchedule: React.FC = () => {
@@ -14,6 +15,7 @@ const AllSchedule: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   const fetchTasks = async () => {
     setLoading(true);
@@ -85,7 +87,15 @@ const AllSchedule: React.FC = () => {
             <span className="day-number">{formattedDate}</span>
             <div className="day-tasks">
               {dayTasks.map(task => (
-                <div key={task.id} className="mini-task" title={task.name}>
+                <div 
+                  key={task.id} 
+                  className="mini-task" 
+                  title={task.name}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedTask(task);
+                  }}
+                >
                   <span className="task-dot"></span>
                   <div className="task-info">
                     {viewMode === 'week' && <span className="task-time">{format(parseISO(task.startTime), 'HH:mm')}</span>}
@@ -162,6 +172,12 @@ const AllSchedule: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onTaskCreated={fetchTasks}
+      />
+      <TaskDetailModal
+        isOpen={!!selectedTask}
+        onClose={() => setSelectedTask(null)}
+        task={selectedTask}
+        onTaskUpdated={fetchTasks}
       />
     </>
   );

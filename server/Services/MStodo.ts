@@ -20,13 +20,19 @@ export async function createTodoItem(task: Task, token: string): Promise<void> {
         
         if (!defaultList) throw new Error('No list found');
         
-        const taskResponse = await axios.post(`https://graph.microsoft.com/v1.0/me/todo/lists/${defaultList.id}/tasks`, {
+        const payload: any = {
             title: task.name,
             body: { content: task.description || '', contentType: 'text' },
             dueDateTime: { dateTime: task.dueDate, timeZone: 'UTC' },
-            importance: 'normal',
+            importance: task.importance || 'normal',
             status: task.completed ? 'completed' : 'notStarted'
-        }, { headers });
+        };
+
+        if (task.isReminderOn && task.startTime) {
+            payload.reminderDateTime = { dateTime: task.startTime, timeZone: 'UTC' };
+        }
+
+        const taskResponse = await axios.post(`https://graph.microsoft.com/v1.0/me/todo/lists/${defaultList.id}/tasks`, payload, { headers });
         
         if (taskResponse.data) {
             task.pushedToMSTodo = true;

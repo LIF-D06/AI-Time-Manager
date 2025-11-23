@@ -2,6 +2,7 @@ import { logger } from '../Utils/logger.js';
 import OpenAI from 'openai';
 import Configuration from 'openai';
 import { IEmail } from './types';
+import { getOpenAITools } from './mcp';
 
 // 定义邮件处理请求和响应接口
 export interface EmailProcessRequest {
@@ -42,45 +43,101 @@ export class LLMApi {
      * @param email 邮件对象
      * @returns 分析结果
      */
-    async processEmail(email: IEmail): Promise<EmailProcessResponse> {
+    async processEmail(email: IEmail): Promise<any> {
         try {
-            logger.exchange(`使用 OpenAI API 处理邮件: ${email.subject}`);
+            logger.exchange(`使用 LLM 处理邮件: ${email.subject}`);
 
             const prompt = this.generateEmailProcessingPrompt(email);
+
+            const mcpTools = getOpenAITools();
+            // Only use add_schedule from MCP tools for email processing
+            const tools = [
+                ...mcpTools.filter(t => t.function.name === 'add_schedule'),
+                {
+                    type: "function",
+                    function: {
+                        name: "log_info",
+                        description: "Log information from email that is purely informational and does not require a schedule or task.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                summary: {
+                                    type: "string",
+                                    description: "Summary of the information",
+                                },
+                                importance: {
+                                    type: "string",
+                                    enum: ["high", "medium", "low"],
+                                    description: "Importance level",
+                                },
+                            },
+                            required: ["summary"],
+                        },
+                    },
+                },
+            ];
 
             const response = await this.openai.chat.completions.create({
                 model: this.model,
                 messages: [
                     {
                         role: 'system',
-                        content: '你是一个专业的邮件分析助手，能够准确识别邮件内容类型并提取关键信息。'
+                        content: `你是一个从邮件中提取日程信息专业的邮件分析助手。现在是 ${new Date().toISOString()}。
+请分析邮件内容，并调用适当的工具来处理。
+- 如果邮件包含会议、待办事项、截止日期或任何需要安排时间的内容，请调用 'add_schedule'。
+- 如果邮件仅包含信息通知，不需要采取行动，请调用 'log_info'。
+- 确保提取的时间格式为 ISO 8601。`
                     },
                     {
                         role: 'user',
                         content: prompt
                     }
                 ],
-                response_format: {
-                    type: 'json_object'
-                },
+                tools: tools as any,
+                tool_choice: "auto",
                 temperature: 0.3,
             });
 
-            const data = response;
-            if (!data.choices || data.choices.length === 0 || !data.choices[0].message?.content) {
-                throw new Error('OpenAI API 返回空响应');
+            const message = response.choices[0].message;
+            
+            if (message.tool_calls && message.tool_calls.length > 0) {
+                const toolCall = message.tool_calls[0] as any;
+                logger.success(`邮件处理成功，触发工具调用: ${toolCall.function.name}`);
+                return {
+                    tool_calls: message.tool_calls
+                };
             }
 
-            const result = JSON.parse(data.choices[0].message.content);
-            logger.success(`邮件处理成功，识别类型: ${result.type}`);
-            return result;
+            logger.warn(`OpenAI API 未触发任何工具调用，返回默认信息`);
+            return {
+                tool_calls: [{
+                    id: 'default',
+                    type: 'function',
+                    function: {
+                        name: 'log_info',
+                        arguments: JSON.stringify({
+                            summary: '无法识别邮件类型或不需要操作',
+                            importance: 'low'
+                        })
+                    }
+                }]
+            };
+
         } catch (error: any) {
             logger.error(`OpenAI API 调用失败: ${error.message || '未知错误'}`);
-            // 返回默认值以保证系统继续运行
-            return {
-                type: 'other',
-                summary: '无法分析邮件内容',
-                action: 'manual_review'
+            // 返回默认错误处理
+             return {
+                tool_calls: [{
+                    id: 'error',
+                    type: 'function',
+                    function: {
+                        name: 'log_info',
+                        arguments: JSON.stringify({
+                            summary: '邮件分析失败',
+                            importance: 'medium'
+                        })
+                    }
+                }]
             };
         }
     }
@@ -91,117 +148,17 @@ export class LLMApi {
     private generateEmailProcessingPrompt(email: IEmail): string {
         const emailContent = email.body || '';
         const emailSubject = email.subject || '';
-        logger.exchange(`邮件主题: ${emailSubject}`);
-        // 不再输出邮件内容，避免控制台过载
         const from = email.from?.name || email.from?.address || '未知发件人';
 
-        return `请分析以下邮件，并按照指定的JSON格式返回分析结果：
-
-发件人: ${from}
+        return `发件人: ${from}
 主题: ${emailSubject}
 内容: ${emailContent}
 
-请识别邮件类型（会议邀请、待办事项、信息通知或其他），并提取关键信息。请以JSON格式返回，包含以下字段：
-- type: 邮件类型 ('meeting', 'todo', 'info', 'other')
-- summary: 邮件内容摘要
-- action: 建议采取的操作
-- details: 详细信息对象，根据邮件类型可能包含：
-  - date: 日期 (格式: YYYY-MM-DD，例如: 2024-01-15)
-  - time: 时间 (格式: HH:mm，例如: 14:30)
-  - duration: 持续时间（分钟）
-  - location: 地点
-  - attendees: 参与者邮箱数组
-  - priority: 优先级 ('high', 'medium', 'low')
-  - deadline: 截止时间 (格式: ISO 8601，例如: 2024-01-15T14:30:00.000Z)
-
-重要提示：
-- 现在是${new Date().toISOString()}
-- 请将任何包含潜在日程的邮件都视为会议邀请或待办事项，无论邮件主题和内容是否明确指出（例如，有些待办事项可能以“通知”开头），都需要提取相关信息。
-- 包含潜在日程的活动邀请和广告也算作待办事项，需要提取相关信息。
-- 请将报名成功的回执也视为待办事项，需要提取相关信息。
-- 包含需要用户进一步操作的邮件（例如，需要用户确认或输入信息，加入群聊），也视为待办事项。
-- 请不要漏掉任何日期和时间相关的信息，包括会议开始时间、结束时间、待办事项截止时间等。
-- 请根据邮件内容判断是否包含地点信息，若包含则提取并记录。
-- 请根据邮件内容判断是否包含截止时间。
-- 如果无法确定具体的日期或时间，请不要提供date、time或deadline字段，或者设置为null
-- 不要使用"未明确指定"等中文文本作为日期时间值
-- 确保所有日期时间格式都是标准的、可解析的格式
-
-请确保返回的是有效的JSON格式，不要包含任何其他文本。`;
+请分析上述邮件并调用相应的工具。`;
     }
 
-    /**
-     * 生成确认回复内容
-     */
-    async generateConfirmationReply(email: IEmail, processResult: EmailProcessResponse): Promise<string> {
-        try {
-            const prompt = `基于以下邮件内容和分析结果，请生成一封简短的确认回复邮件：
 
-邮件主题: ${email.subject}
-邮件内容: ${email.body || ''}
-分析结果: ${JSON.stringify(processResult)}
 
-请生成一个专业、简洁的确认回复，表明已收到邮件并简要提及已识别的内容类型。回复应使用中文，语气友好专业。`;
-
-            const response = await this.openai.chat.completions.create({
-                model: this.model,
-                messages: [
-                    {
-                        role: 'system',
-                        content: '你是一个专业的邮件助手，负责生成简洁、专业的邮件回复。'
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                temperature: 0.3,
-            });
-
-            return response.choices[0]?.message?.content || '已收到您的邮件，我们会尽快处理。';
-        } catch (error: any) {
-            logger.error(`生成确认回复失败: ${error.message || '未知错误'}`);
-            return '已收到您的邮件，我们会尽快处理。';
-        }
-    }
-
-    /**
-     * 分析邮件重要性
-     */
-    async analyzeEmailImportance(email: IEmail): Promise<{ importance: 'high' | 'medium' | 'low'; reason: string }> {
-        try {
-            const prompt = `请分析以下邮件的重要性，并返回高、中或低的评分以及评分理由：
-
-发件人: ${email.from?.name || email.from?.address || '未知发件人'}
-主题: ${email.subject || ''}
-内容: ${email.body || ''}
-
-请以JSON格式返回，包含importance字段（'high'、'medium'或'low'）和reason字段（评分理由）。`;
-
-            const response = await this.openai.chat.completions.create({
-                model: this.model,
-                messages: [
-                    {
-                        role: 'system',
-                        content: '你是一个专业的邮件重要性分析助手。'
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                response_format: {
-                    type: 'json_object'
-                },
-                temperature: 0.1,
-            });
-
-            return JSON.parse(response.choices[0]?.message?.content || '{"importance": "medium", "reason": "无法分析"}');
-        } catch (error: any) {
-            logger.error(`分析邮件重要性失败: ${error.message || '未知错误'}`);
-            return { importance: 'medium', reason: '无法分析重要性' };
-        }
-    }
 
     /**
      * 通用聊天接口，支持流式输出

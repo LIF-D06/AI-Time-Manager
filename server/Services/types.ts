@@ -43,6 +43,8 @@ export interface IEvent {
   location?: string;
   body?: string;
   attendees?: string[];
+  importance?: 'high' | 'normal' | 'low';
+  isReminderOn?: boolean;
 }
 
 export interface CourseSchedule {

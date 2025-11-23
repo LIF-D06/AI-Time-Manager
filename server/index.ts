@@ -64,6 +64,8 @@ export interface Task {
     attendees?: string[]; // fit IEvent.attendees
     recurrenceRule?: string; // JSON字符串，包含 {freq:'daily'|'weekly', interval?:number, count?:number, until?:ISO}
     parentTaskId?: string; // 若为重复任务生成的子实例，则指向源任务
+    importance?: 'high' | 'normal' | 'low';
+    isReminderOn?: boolean;
 }
 
 export interface User {

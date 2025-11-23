@@ -26,6 +26,8 @@ export interface Task {
     attendees?: string[];
     recurrenceRule?: string;
     parentTaskId?: string;
+    importance?: 'high' | 'normal' | 'low';
+    isReminderOn?: boolean;
 }
 
 export interface User {
@@ -136,6 +138,8 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
                             dueDate: event.end,
                             completed: false,
                             pushedToMSTodo: false,
+                            importance: event.importance,
+                            isReminderOn: event.isReminderOn,
                         } as Task;
                         try {
                             await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive);
@@ -192,15 +196,20 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
                         }
                         if (!targetList) throw new Error('No list found');
 
-                        await axios.post(`https://graph.microsoft.com/v1.0/me/todo/lists/${targetList.id}/tasks`, {
+                        const payload: any = {
                             title: task.name,
                             body: { content: task.description || '', contentType: 'text' },
                             dueDateTime: { dateTime: task.dueDate, timeZone: 'UTC' },
                             startDateTime: task.startTime ? { dateTime: task.startTime, timeZone: 'UTC' } : undefined,
-                            reminderDateTime: task.startTime ? { dateTime: task.startTime, timeZone: 'UTC' } : undefined,
-                            importance: 'normal',
+                            importance: task.importance || 'normal',
                             status: task.completed ? 'completed' : 'notStarted'
-                        }, { headers });
+                        };
+
+                        if (task.isReminderOn && task.startTime) {
+                            payload.reminderDateTime = { dateTime: task.startTime, timeZone: 'UTC' };
+                        }
+
+                        await axios.post(`https://graph.microsoft.com/v1.0/me/todo/lists/${targetList.id}/tasks`, payload, { headers });
 
                         task.pushedToMSTodo = true;
                         logger.success(`Pushed task ${task.id} to MS Todo`);

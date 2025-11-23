@@ -235,6 +235,15 @@ export interface EbridgeStatus {
   connected: boolean;
 }
 
+export class ScheduleConflictError extends Error {
+  conflicts: Task[];
+  constructor(message: string, conflicts: Task[]) {
+    super(message);
+    this.name = 'ScheduleConflictError';
+    this.conflicts = conflicts;
+  }
+}
+
 export const createTask = async (taskData: Omit<Task, 'id' | 'completed'>) => {
   const token = getToken();
   if (!token) throw new Error('用户未登录');
@@ -250,6 +259,9 @@ export const createTask = async (taskData: Omit<Task, 'id' | 'completed'>) => {
 
   if (!response.ok) {
     const errorData = await response.json();
+    if (response.status === 409 && errorData.conflicts) {
+      throw new ScheduleConflictError(errorData.error || '日程冲突', errorData.conflicts);
+    }
     throw new Error(errorData.error || '创建任务失败');
   }
 
@@ -271,7 +283,49 @@ export const updateTask = async (taskId: string, taskData: Partial<Omit<Task, 'i
 
   if (!response.ok) {
     const errorData = await response.json();
+    if (response.status === 409 && errorData.conflicts) {
+      throw new ScheduleConflictError(errorData.error || '日程冲突', errorData.conflicts);
+    }
     throw new Error(errorData.error || '更新任务失败');
+  }
+
+  return await response.json();
+};
+
+export interface BatchTaskResult {
+  input: any;
+  status: 'created' | 'conflict' | 'error';
+  task?: Task;
+  conflictList?: Task[];
+  errorMessage?: string;
+}
+
+export interface BatchTasksResponse {
+  results: BatchTaskResult[];
+  summary: {
+    total: number;
+    created: number;
+    conflicts: number;
+    errors: number;
+  };
+}
+
+export const createTasksBatch = async (tasks: Omit<Task, 'id' | 'completed'>[], boundaryConflict: boolean = false): Promise<BatchTasksResponse> => {
+  const token = getToken();
+  if (!token) throw new Error('用户未登录');
+
+  const response = await customFetch('/api/tasks/batch', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ tasks, boundaryConflict }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || '批量创建任务失败');
   }
 
   return await response.json();
@@ -299,4 +353,21 @@ export const getTasks = async (params: { start: string; end: string; limit?: num
   }
 
   return await response.json();
+};
+
+export const deleteTask = async (taskId: string): Promise<void> => {
+  const token = getToken();
+  if (!token) throw new Error('用户未登录');
+
+  const response = await customFetch(`/api/tasks/${taskId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || '删除任务失败');
+  }
 };

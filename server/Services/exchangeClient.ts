@@ -25,14 +25,16 @@ import {
     EventType,
     MessageBody,
     NotificationEvent,
+    Importance,
 } from 'ews-javascript-api';
 import { ExchangeConfig, IEmail, IEvent } from './types';
 import { logger } from '../Utils/logger.js';
 import moment from 'moment-timezone';
-import { LLMApi, EmailProcessResponse } from './LLMApi.js';
+import { LLMApi } from './LLMApi.js';
 import { createTodoItem } from './MStodo.js';
-import { createTaskToUser, User, Task } from '../index.js';
+import { User, Task } from '../index.js';
 import { v4 as uuidv4 } from 'uuid';
+import { mcpTools } from './mcp.js';
 
 // 以下代码将禁用 SSL/TLS 证书验证。
 // 如果您的 Exchange 服务器使用自签名证书，则需要此设置。
@@ -296,11 +298,17 @@ export class ExchangeClient {
                 AppointmentSchema.End,
                 AppointmentSchema.Location,
                 AppointmentSchema.Body,
-                AppointmentSchema.RequiredAttendees
+                AppointmentSchema.RequiredAttendees,
+                AppointmentSchema.Importance,
+                AppointmentSchema.IsReminderSet
             ]);
             
             const appointment = await Appointment.Bind(this.service, appointmentId, propSet);
             
+            let importance: 'high' | 'normal' | 'low' = 'normal';
+            if (appointment.Importance === Importance.High) importance = 'high';
+            else if (appointment.Importance === Importance.Low) importance = 'low';
+
             // 将日历事件转换为任务格式
             const taskData: Task = {
                 id: uuidv4(),
@@ -311,7 +319,9 @@ export class ExchangeClient {
                 endTime: appointment.End.ToUniversalTime().ToISOString(),
                 location: appointment.Location || '',
                 completed: false,
-                pushedToMSTodo: false
+                pushedToMSTodo: false,
+                importance: importance,
+                isReminderOn: appointment.IsReminderSet
             };
             
             logger.exchange(`日历事件详情 - 主题: ${taskData.name}, 开始时间: ${taskData.startTime}, 结束时间: ${taskData.endTime}`);
@@ -344,11 +354,8 @@ export class ExchangeClient {
             // 接入OpenAI API
             const apiResponse = await this.callDeepSeekAPI(email);
             
-            // 解析API响应
-            const processedData = this.parseDeepSeekResponse(apiResponse);
-            
             // 触发后续处理逻辑
-            await this.handleProcessedData(processedData, email);
+            await this.handleProcessedData(apiResponse, email);
             
             logger.success(`成功自动处理邮件: ${email.subject}`);   
         } catch (error: any) {
@@ -409,227 +416,72 @@ export class ExchangeClient {
         return this.llmApi.processEmail(email);
     }
     
-    // 解析API响应
-    private parseDeepSeekResponse(response: any): EmailProcessResponse {
-        // 由于我们直接使用LLMApi返回的结构化数据，这里可以直接返回
-        return response as EmailProcessResponse;
-    }
-    
+
     // 触发后续处理逻辑
-    private async handleProcessedData(processedData: EmailProcessResponse, email: IEmail): Promise<void> {
-        logger.exchange(`处理邮件类型: ${processedData.type}，摘要: ${processedData.summary}`);
-        
-        // 根据邮件类型执行不同的处理逻辑
-        switch (processedData.type) {
-            case 'meeting':
-                await this.handleMeetingEmail(processedData, email);
-                break;
-            case 'todo':
-                await this.handleTodoEmail(processedData, email);
-                break;
-            case 'info':
-                await this.handleInfoEmail(processedData, email);
-                break;
-            default:
-                logger.exchange(`未识别的邮件类型: ${processedData.type}`);
-                break;
+    private async handleProcessedData(processedData: any, email: IEmail): Promise<void> {
+        if (!processedData.tool_calls || processedData.tool_calls.length === 0) {
+            logger.exchange(`未触发任何工具调用`);
+            return;
+        }
+
+        for (const toolCall of processedData.tool_calls) {
+            const functionName = (toolCall as any).function.name;
+            const args = JSON.parse((toolCall as any).function.arguments);
+            
+            logger.exchange(`处理工具调用: ${functionName}, 参数: ${JSON.stringify(args)}`);
+
+            if (functionName === 'add_schedule') {
+                await this.handleAddScheduleTool(args, email);
+            } else if (functionName === 'log_info') {
+                await this.handleLogInfoTool(args, email);
+            } else {
+                logger.warn(`未知的工具调用: ${functionName}`);
+            }
         }
         
         // 分析邮件重要性
-        if (this.llmApi) {
-            const importance = await this.llmApi.analyzeEmailImportance(email);
-            logger.exchange(`邮件重要性: ${importance.importance}，理由: ${importance.reason}`);
-        }
+        // if (this.llmApi) {
+        //     const importance = await this.llmApi.analyzeEmailImportance(email);
+        //     logger.exchange(`邮件重要性: ${importance.importance}，理由: ${importance.reason}`);
+        // }
     }
 
-    private async createTask(eventData: IEvent): Promise<void> {
-        // 实现创建任务的逻辑
+    private async handleAddScheduleTool(args: any, email: IEmail): Promise<void> {
         if (!this.user) {
-            throw new Error('用户未初始化');
-        }
-        
-        try {
-            //创建邮箱日历事件
-            // 调用Exchange API创建事件
-            await this.createEvent(eventData);
-
-            await createTaskToUser(this.user, {
-                name: eventData.subject,
-                description: eventData.body || '',
-                dueDate: eventData.end,
-                startTime: eventData.start,
-                endTime: eventData.end,
-                completed: false,
-                pushedToMSTodo: false,
-                id: uuidv4(), // 生成唯一ID
-            });
-            logger.success(`任务已创建: ${eventData.subject}`);
-        } catch (error: any) {
-            logger.error(`创建任务失败: ${error.message || '未知错误'}`);
-            throw error;
-        }
-        
-    }
-
-    
-    // 处理会议类型邮件
-    private async handleMeetingEmail(processedData: EmailProcessResponse, email: IEmail): Promise<void> {
-        if (processedData.details?.date && processedData.details?.time) {
-            // 清理邮件正文内容
-            const cleanedEmailBody = this.cleanHtmlContent(email.body || '');
-            
-            // 如果包含日期和时间信息，可以自动创建日历事件
-            const eventData: IEvent = {
-                subject: processedData.summary,
-                body: `来自邮件: ${email.subject}\n\n${cleanedEmailBody}`,
-                start: `${processedData.details.date}T${processedData.details.time}`,
-                end: this.calculateEndTime(processedData.details.date, processedData.details.time, processedData.details.duration || 60),
-                location: processedData.details.location || '',
-                attendees: processedData.details.attendees || []
-            };
-            
-            try {
-                await this.createTask(eventData);
-                logger.success(`已自动创建日历事件: ${eventData.subject}`);
-            } catch (error: any) {
-                logger.error(`创建日历事件失败: ${error.message || '未知错误'}`);
-            }
-        }
-        
-        // 生成并发送确认回复
-        // await this.sendProcessedConfirmation(email, processedData);
-    }
-    
-    // 处理待办事项类型邮件
-    private async handleTodoEmail(processedData: EmailProcessResponse, email: IEmail): Promise<void> {
-        // 实现将待办事项保存到任务管理系统的逻辑
-        if (processedData.details) {
-            // 验证日期格式
-            function isValidDateTime(dateString: string): boolean {
-                if (!dateString) return false;
-                if (dateString.includes('未明确指定')) return false;
-                
-                // 检查是否为有效的ISO 8601格式
-                const iso8601Regex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/;
-                if (!iso8601Regex.test(dateString)) {
-                    return false;
-                }
-                
-                const date = new Date(dateString);
-                return date instanceof Date && !isNaN(date.getTime());
-            }
-            
-            let deadline = processedData.details.deadline;
-            
-            if (!deadline) {
-                //合成date和time作为deadline(ISO 8601格式)
-                //date:YYYY-MM-DD time:HH:mm
-                deadline = `${processedData.details.date}T${processedData.details.time}:00.000Z`;
-            }
-            if (!deadline) {
-                deadline = new Date().toISOString();
-            }
-            
-            if (!isValidDateTime(deadline)) {
-                logger.warn(`检测到无效的日期格式: ${deadline}`);
-                
-                // 清理邮件主题，确保警告邮件内容安全
-                const cleanedSubject = this.cleanHtmlContent(email.subject || '无主题');
-                //重试
-                await this.callDeepSeekAPI(email);
-
-                // 发送警告邮件给用户
-                // try {
-                //     const warningEmail = new EmailMessage(this.service);
-                //     warningEmail.ToRecipients.Add(email.from?.address || '');
-                //     warningEmail.Subject = `任务创建失败 - 日期格式错误`;
-                //     warningEmail.Body = new MessageBody(
-                //         `您好！\n\n` +
-                //         `我们检测到您的邮件中包含无效的日期格式，导致无法自动创建任务。\n\n` +
-                //         `邮件主题: ${cleanedSubject}\n` +
-                //         `检测到的日期: ${deadline}\n\n` +
-                //         `请确保在邮件中使用标准的日期时间格式，例如：\n` +
-                //         `- 2024-01-15T14:30:00.000Z (ISO 8601格式)\n` +
-                //         `- 2024年1月15日 14:30\n` +
-                //         `- 2024-01-15 14:30\n\n` +
-                //         `感谢您的理解！`
-                //     );
-                //     await warningEmail.Send();
-                //     logger.success(`已发送日期格式警告邮件给用户: ${email.from?.address}`);
-                // } catch (error: any) {
-                //     logger.error(`发送警告邮件失败: ${error.message || '未知错误'}`);
-                // }
-                
-                return; // 不创建任务
-            }
-            
-            // 清理邮件正文内容
-            const cleanedEmailBody = this.cleanHtmlContent(email.body || '');
-            
-            // 如果包含截止日期信息，可以自动创建任务
-            const taskData: IEvent = {
-                subject: processedData.summary,
-                body: `来自邮件: ${email.subject}\n\n${cleanedEmailBody}`,
-                start: processedData.details?.deadline || new Date().toISOString(),
-                end: processedData.details?.deadline || new Date().toISOString(),
-                location: '',
-                attendees: []
-            };
-            
-            try {
-                await this.createTask(taskData);
-                logger.success(`已自动创建任务: ${taskData.subject}`);
-            } catch (error: any) {
-                logger.error(`创建任务失败: ${error.message || '未知错误'}`);
-                // 不抛出错误，继续处理其他邮件
-            }
+            logger.error('无法创建任务：用户未初始化');
+            return;
         }
 
-        logger.exchange(`待办事项详情: ${JSON.stringify(processedData.details)}`);
-        
-        // 生成并发送确认回复
-        // await this.sendProcessedConfirmation(email, processedData);
-    }
-    
-    // 处理信息通知类型邮件
-    private async handleInfoEmail(processedData: EmailProcessResponse, email: IEmail): Promise<void> {
-        // 这里可以实现信息分类存储的逻辑
-        logger.exchange(`信息通知已记录: ${processedData.summary}`);
-        
-        // 生成并发送确认回复
-        // await this.sendProcessedConfirmation(email, processedData);
-    }
-    
-    // 计算结束时间
-    private calculateEndTime(date: string, startTime: string, durationMinutes: number): string {
-        const start = moment(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm');
-        const end = start.add(durationMinutes, 'minutes');
-        return end.format('YYYY-MM-DD[T]HH:mm');
-    }
-    
-    // 发送处理确认回复
-    private async sendProcessedConfirmation(originalEmail: IEmail, processedData: EmailProcessResponse): Promise<void> {
-        try {
-            if (!this.llmApi || !originalEmail.from?.address) {
-                logger.warn('无法发送确认回复：缺少必要信息');
-                return;
-            }
-            
-            // 使用LLM生成个性化回复
-            const replyContent = await this.llmApi.generateConfirmationReply(originalEmail, processedData);
-            
-            const replyEmail = new EmailMessage(this.service);
-            replyEmail.ToRecipients.Add(originalEmail.from.address);
-            replyEmail.Subject = `已处理: ${originalEmail.subject}`;
-            replyEmail.Body = new MessageBody(replyContent);
-            
-            await replyEmail.Send();
-            logger.success(`已发送处理确认回复至: ${originalEmail.from.address}`);
-        } catch (error: any) {
-            logger.error(`发送处理确认回复失败: ${error.message || '未知错误'}`);
+        // 清理邮件正文内容
+        const cleanedEmailBody = this.cleanHtmlContent(email.body || '');
+        const description = args.description ? `${args.description}\n\n来自邮件: ${email.subject}\n\n${cleanedEmailBody}` : `来自邮件: ${email.subject}\n\n${cleanedEmailBody}`;
+
+        const toolArgs = {
+            ...args,
+            description
+        };
+
+        // 调用 MCP 工具创建任务 (DB)
+        // 注意：mcpTools.add_schedule.execute 会处理默认时间和验证
+        const result = await mcpTools.add_schedule.execute(toolArgs, this.user);
+
+        if ((result as any).task) {
+            const task = (result as any).task as Task;
+            logger.success(`已自动创建任务 (DB): ${task.name}`);
+            // mcpTools.add_schedule.execute 已经处理了 Exchange 同步，这里不需要再次调用 createEvent
+        } else {
+            const errorText = result.content && result.content[0] ? result.content[0].text : '未知错误';
+            logger.error(`创建任务失败 (DB): ${errorText}`);
         }
     }
+
+    private async handleLogInfoTool(args: any, email: IEmail): Promise<void> {
+        logger.exchange(`信息通知已记录: ${args.summary} (重要性: ${args.importance})`);
+    }
+
+
     
+
     // 健康检查定时
     
     // 启动健康检查
@@ -831,6 +683,25 @@ export class ExchangeClient {
             appointment.End = new DateTime(eventData.end);
             appointment.Location = eventData.location || '';
 
+            // 设置重要性
+            if (eventData.importance) {
+                switch (eventData.importance) {
+                    case 'high':
+                        appointment.Importance = Importance.High;
+                        break;
+                    case 'low':
+                        appointment.Importance = Importance.Low;
+                        break;
+                    default:
+                        appointment.Importance = Importance.Normal;
+                }
+            }
+
+            // 设置提醒
+            if (eventData.isReminderOn !== undefined) {
+                appointment.IsReminderSet = eventData.isReminderOn;
+            }
+
             // 安全地添加与会者
             if (eventData.attendees && eventData.attendees.length > 0) {
                 eventData.attendees.forEach(email => {
@@ -869,7 +740,9 @@ export class ExchangeClient {
             AppointmentSchema.Subject,
             AppointmentSchema.Start,
             AppointmentSchema.End,
-            AppointmentSchema.Location
+            AppointmentSchema.Location,
+            AppointmentSchema.Importance,
+            AppointmentSchema.IsReminderSet
         ]);
 
         try {
@@ -908,12 +781,29 @@ export class ExchangeClient {
      * 将 EWS Appointment 对象解析为 IEvent 格式
      */
     private parseEventFromEWS(appointment: Appointment): IEvent {
+        let importance: 'high' | 'normal' | 'low' = 'normal';
+        try {
+            if (appointment.Importance === Importance.High) importance = 'high';
+            else if (appointment.Importance === Importance.Low) importance = 'low';
+        } catch (e) {
+            // Property might not be loaded
+        }
+
+        let isReminderOn = false;
+        try {
+            isReminderOn = appointment.IsReminderSet;
+        } catch (e) {
+            // Property might not be loaded
+        }
+
         return {
             id: appointment.Id.UniqueId,
             subject: appointment.Subject,
             start: appointment.Start.MomentDate.toISOString(),
             end: appointment.End.MomentDate.toISOString(),
             location: appointment.Location,
+            importance: importance,
+            isReminderOn: isReminderOn
         };
     }
 }
