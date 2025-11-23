@@ -666,3 +666,18 @@
   text-decoration: line-through;
   color: var(--color-text-light);
 }
+
+/* Search Page Layout Fixes */
+.search-container .search-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0; /* Crucial for nested flex scrolling */
+}
+
+.search-container .task-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px; /* Avoid scrollbar covering content */
+}

@@ -38,14 +38,7 @@ const SearchTasks: React.FC = () => {
       } else {
         setTasks(prev => [...prev, ...response.tasks]);
       }
-      // The API response structure for getTasks might need to be checked if it returns total
-      // Based on dbService.getTasksPage, it returns { tasks, total }
-      // But api.ts getTasks returns TasksResponse which is { tasks: Task[] }
-      // Wait, let me check api.ts again.
-      // The backend returns { tasks, total, limit, offset ... }
-      // But the interface TasksResponse in api.ts only has tasks: Task[].
-      // I should cast it or update the interface. For now I'll assume it has total.
-      setTotal((response as any).total || 0);
+      setTotal(response.total);
     } catch (error) {
       console.error('Failed to search tasks', error);
     } finally {
@@ -78,7 +71,7 @@ const SearchTasks: React.FC = () => {
         order: 'desc'
     }).then(response => {
         setTasks(prev => [...prev, ...response.tasks]);
-        setTotal((response as any).total || 0);
+        setTotal(response.total);
         setLoading(false);
     }).catch(e => {
         console.error(e);
@@ -92,7 +85,7 @@ const SearchTasks: React.FC = () => {
         <CardHeader className="schedule-header">
           <CardTitle>搜索任务</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="search-content">
           <div className="search-controls">
             <div className="search-input-container">
               <Search size={18} className="search-icon" />
@@ -139,14 +132,14 @@ const SearchTasks: React.FC = () => {
                   <div className="task-status-icon">
                     {task.completed ? <CheckCircle2 size={20} className="text-green-500" /> : <Circle size={20} className="text-gray-400" />}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div className="task-name" style={{ fontWeight: 500 }}>{task.name}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="task-name" style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{task.name}</div>
                     <div className="task-meta" style={{ fontSize: '12px', color: '#666', display: 'flex', gap: '10px', marginTop: '4px' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                         <Calendar size={12} />
                         {format(parseISO(task.startTime), 'yyyy-MM-dd HH:mm', { locale: zhCN })}
                       </span>
-                      {task.location && <span>📍 {task.location}</span>}
+                      {task.location && <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📍 {task.location}</span>}
                     </div>
                     {task.description && (
                         <div className="task-desc" style={{ fontSize: '12px', color: '#888', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

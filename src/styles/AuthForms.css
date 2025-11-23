@@ -6,7 +6,6 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(135deg, var(--color-gradient-start) 0%, var(--color-gradient-end) 100%);
   padding: 20px;
 }
 
@@ -23,6 +22,29 @@
   margin-bottom: 20px;
   text-align: center;
   font-size: 14px;
+}
+
+.switch-auth-link {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--color-text-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.switch-auth-link a {
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.switch-auth-link a:hover {
+  color: var(--color-primary-active-border);
+  text-decoration: underline;
 }
 
 @media (max-width: 480px) {

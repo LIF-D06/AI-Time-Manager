@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Settings, Bot, User as UserIcon, Terminal } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Send, Settings, Bot, User as UserIcon, Terminal, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { SimpleMcpClient, type McpTool } from '../../services/SimpleMcpClient';
 import { chatCompletion, type ChatMessage, type LLMConfig } from '../../services/llmService';
 import { getToken } from '../../services/api';
@@ -9,6 +11,37 @@ import { Input } from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
 import { Badge } from '../ui/Badge';
 import '../../styles/AIChat.css';
+
+const ToolMessage: React.FC<{ content: string; name: string }> = ({ content, name }) => {
+  const [expanded, setExpanded] = useState(false);
+  let parsedContent: any = content;
+  let isJson = false;
+  try {
+    parsedContent = JSON.parse(content);
+    isJson = true;
+  } catch (e) {
+    // ignore
+  }
+
+  return (
+    <div className="tool-result-container">
+      <div className="tool-result-header" onClick={() => setExpanded(!expanded)}>
+        <div className="tool-info">
+          <CheckCircle2 size={14} style={{ color: 'var(--color-success)' }} />
+          <span className="tool-name">调用成功: {name}</span>
+        </div>
+        <div className="tool-toggle">
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </div>
+      </div>
+      {expanded && (
+        <div className="tool-result-body">
+          <pre>{isJson ? JSON.stringify(parsedContent, null, 2) : content}</pre>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const AIChat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -225,23 +258,18 @@ const AIChat: React.FC = () => {
             )}
             
             {msg.role === 'tool' ? (
-              <div className="tool-result">
-                <div className="tool-header">
-                  <Terminal size={14} />
-                  <span>Tool Output ({msg.name})</span>
-                </div>
-                <div className="tool-output">
-                  {msg.content}
-                </div>
-              </div>
+              <ToolMessage content={msg.content || ''} name={msg.name || 'Unknown Tool'} />
             ) : (
-              <div className="message-content">
-                {msg.content}
+              <div className="message-content markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {msg.content}
+                </ReactMarkdown>
                 {msg.tool_calls && (
                   <div className="tool-calls-preview">
                     {msg.tool_calls.map((tc: any, i: number) => (
-                      <div key={i} className="tool-call-badge">
-                        <Badge variant="info">🛠️ Calling: {tc.function.name}</Badge>
+                      <div key={i} className="tool-call-item">
+                        <Terminal size={14} />
+                        <span>正在执行: {tc.function.name}</span>
                       </div>
                     ))}
                   </div>

@@ -226,6 +226,11 @@ export interface Task {
 
 export interface TasksResponse {
   tasks: Task[];
+  total: number;
+  limit: number;
+  offset: number;
+  sortBy: string;
+  order: 'asc' | 'desc';
 }
 
 export interface MicrosoftTodoStatus {
@@ -273,7 +278,7 @@ export const updateTask = async (taskId: string, taskData: Partial<Omit<Task, 'i
   const token = getToken();
   if (!token) throw new Error('用户未登录');
 
-  const response = await customFetch(`/api/tasks/${taskId}`, {
+  const response = await customFetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -365,7 +370,7 @@ export const deleteTask = async (taskId: string): Promise<void> => {
   const token = getToken();
   if (!token) throw new Error('用户未登录');
 
-  const response = await customFetch(`/api/tasks/${taskId}`, {
+  const response = await customFetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
     method: 'DELETE',
     headers: {
       'Authorization': `Bearer ${token}`,
