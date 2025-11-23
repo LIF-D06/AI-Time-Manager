@@ -1,5 +1,9 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { login, setToken } from '../services/api';
+import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
+import { Input } from './ui/Input';
+import { Button } from './ui/Button';
 import '../styles/AuthForms.css';
 
 interface LoginProps {
@@ -30,13 +34,15 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
   return (
     <div className="auth-container">
-      <div className="auth-form">
-        <h2>登录</h2>
-        {error && <div className="error-message">{error}</div>}
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="email">邮箱</label>
-            <input
+      <Card className="auth-card">
+        <CardHeader>
+          <CardTitle style={{ justifyContent: 'center' }}>登录</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error && <div className="error-message">{error}</div>}
+          <form onSubmit={handleSubmit}>
+            <Input
+              label="邮箱"
               type="email"
               id="email"
               value={email}
@@ -44,10 +50,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               required
               autoComplete="email"
             />
-          </div>
-          <div className="form-group">
-            <label htmlFor="password">密码</label>
-            <input
+            <Input
+              label="密码"
               type="password"
               id="password"
               value={password}
@@ -55,12 +59,16 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               required
               autoComplete="current-password"
             />
+            <Button type="submit" className="auth-button-full" disabled={loading} style={{ width: '100%', marginTop: '10px' }}>
+              {loading ? '登录中...' : '登录'}
+            </Button>
+          </form>
+          <div className="switch-auth-link">
+            <span>没有账户？ </span>
+            <Link to="/register">立即注册</Link>
           </div>
-          <button type="submit" className="auth-button" disabled={loading}>
-            {loading ? '登录中...' : '登录'}
-          </button>
-        </form>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

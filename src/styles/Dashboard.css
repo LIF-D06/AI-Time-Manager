@@ -1,108 +1,154 @@
 .dashboard-layout {
   display: flex;
   height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-  background-color: #f5f7fa;
+  transition: all 0.3s ease;
 }
 
 .sidebar {
   width: 250px;
-  background-color: #ffffff;
+  background-color: #fff;
   border-right: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
-  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .sidebar-header {
-  height: 64px;
+  padding: 1.5rem;
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  padding: 0 24px;
   border-bottom: 1px solid #e2e8f0;
 }
 
 .sidebar-header h1 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #1a202c;
-  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #2d3748;
+  white-space: nowrap;
+}
+
+.sidebar-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #718096;
+  transition: transform 0.3s ease;
 }
 
 .sidebar-nav {
-  flex: 1;
-  padding: 16px 0;
-  overflow-y: auto;
+  flex-grow: 1;
+  padding: 1rem 0;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 12px 24px;
-  color: #4a5568;
-  text-decoration: none;
-  transition: all 0.2s;
-  cursor: pointer;
+  padding: 0.8rem 1.5rem;
+  width: 100%;
   border: none;
   background: none;
-  width: 100%;
   text-align: left;
+  cursor: pointer;
   font-size: 1rem;
+  color: #4a5568;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  white-space: nowrap;
 }
 
 .nav-item:hover {
-  background-color: #f7fafc;
+  background-color: #f1f5f9;
   color: #2d3748;
 }
 
 .nav-item.active {
-  background-color: #ebf8ff;
-  color: #3182ce;
-  border-right: 3px solid #3182ce;
+  background-color: #eef2ff;
+  color: #4686e5;
+  font-weight: 600;
+  border-right: 4px solid #4686e5;
 }
 
 .nav-item svg {
-  margin-right: 12px;
-  width: 20px;
-  height: 20px;
+  margin-right: 0.75rem;
+  flex-shrink: 0;
 }
 
 .sidebar-footer {
-  padding: 16px;
+  padding: 1rem 0;
   border-top: 1px solid #e2e8f0;
 }
 
-.logout-button-sidebar {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 10px;
-  color: #e53e3e;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
+.dashboard-layout.sidebar-collapsed .sidebar {
+  width: 80px;
 }
 
-.logout-button-sidebar:hover {
-  background-color: #fff5f5;
-  border-color: #fed7d7;
+.dashboard-layout.sidebar-collapsed .sidebar-header h1,
+.dashboard-layout.sidebar-collapsed .nav-text {
+  opacity: 0;
+  visibility: hidden;
+  width: 0;
+  transition: opacity 0.2s ease, visibility 0.2s ease, width 0.2s ease;
 }
 
-.logout-button-sidebar svg {
-  margin-right: 8px;
-  width: 18px;
-  height: 18px;
+.dashboard-layout.sidebar-collapsed .sidebar-header {
+  justify-content: center;
+}
+
+.dashboard-layout.sidebar-collapsed .sidebar-toggle {
+  transform: rotate(180deg);
+}
+
+.dashboard-layout.sidebar-collapsed .nav-item {
+  justify-content: center;
+}
+
+.dashboard-layout.sidebar-collapsed .nav-item svg {
+  margin-right: 0;
 }
 
 .main-content {
-  flex: 1;
+  flex-grow: 1;
+  padding: 2rem;
   overflow-y: auto;
-  padding: 24px;
-  background-color: #f5f7fa;
+  background-color: #f7fafc;
+  transition: margin-left 0.3s ease;
+}
+
+.settings-page {
+  display: grid;
+  gap: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.account-info .info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.account-info .info-item:last-child {
+  border-bottom: none;
+}
+
+.account-info .info-item .info-label {
+  font-weight: 500;
+  color: var(--color-text-medium);
+}
+
+.account-info .info-item .info-value {
+  color: var(--color-text-dark);
+}
+
+.connection-action {
+  margin-top: 16px;
+}
+
+.connection-action p {
+  margin-bottom: 16px;
 }
 
 /* Dashboard Home View Styles */
@@ -138,25 +184,6 @@
   margin-bottom: 32px;
 }
 
-.dashboard-card {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  transition: transform 0.2s;
-}
-
-.dashboard-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
 .card-icon {
   width: 40px;
   height: 40px;
@@ -170,16 +197,6 @@
 .card-icon.blue { background-color: #ebf8ff; color: #3182ce; }
 .card-icon.green { background-color: #f0fff4; color: #38a169; }
 .card-icon.purple { background-color: #faf5ff; color: #805ad5; }
-
-.card-header h3 {
-  margin: 0;
-  font-size: 1.1rem;
-  color: #2d3748;
-}
-
-.card-content {
-  color: #718096;
-}
 
 .status-indicator {
   display: flex;
@@ -197,39 +214,10 @@
 .status-dot.connected { background-color: #48bb78; }
 .status-dot.disconnected { background-color: #f56565; }
 
-.action-button {
-  margin-top: 16px;
-  padding: 8px 16px;
-  background-color: #edf2f7;
-  color: #4a5568;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s;
-  width: 100%;
-}
-
-.action-button:hover {
-  background-color: #e2e8f0;
-  color: #2d3748;
-}
-
 /* Restored Dashboard Content Styles */
 .connection-status-section {
-  background: white;
-  padding: 25px;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
   margin-bottom: 30px;
   text-align: center;
-}
-
-.connection-status-section h3 {
-  color: #333;
-  margin-bottom: 20px;
-  font-size: 20px;
-  font-weight: 600;
 }
 
 .status-container {
@@ -275,34 +263,6 @@
 
 .status-item.disconnected .status-value {
   color: #ef6c00;
-}
-
-.status-badge {
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.status-badge.connected {
-  background: #4caf50;
-  color: white;
-}
-
-.refresh-button {
-  background: #2196f3;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.refresh-button:hover {
-  background: #1976d2;
-  transform: translateY(-1px);
 }
 
 .welcome-section {
@@ -389,93 +349,13 @@
   margin-bottom: 60px;
 }
 
-.microsoft-button {
-  background: #0078d4;
-  color: white;
-  border: none;
-  padding: 16px 32px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  transition: all 0.3s ease;
-}
-
-.microsoft-button:hover {
-  background: #005a9e;
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(0, 120, 212, 0.3);
-}
-
 .password-section {
-  background: white;
-  padding: 30px;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
   max-width: 600px;
   margin: 0 auto;
 }
 
-.password-section h3 {
-  color: #333;
-  margin-bottom: 20px;
-  font-size: 20px;
-  font-weight: 600;
-  text-align: center;
-}
-
 .form-group {
   margin-bottom: 20px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  color: #555;
-  font-weight: 500;
-  font-size: 14px;
-}
-
-.form-group input {
-  width: 100%;
-  padding: 12px;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  font-size: 16px;
-  transition: border-color 0.3s ease;
-  box-sizing: border-box;
-}
-
-.form-group input:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
-
-.update-button {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  padding: 12px 32px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  width: 100%;
-}
-
-.update-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
-}
-
-.update-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .success-message {
@@ -515,28 +395,4 @@
   margin: 0 0 16px 0;
   color: #718096;
   font-size: 0.875rem;
-}
-
-.copy-token-button {
-  background-color: #edf2f7;
-  color: #4a5568;
-  border: 1px solid #cbd5e0;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.copy-token-button:hover {
-  background-color: #e2e8f0;
-  color: #2d3748;
-  border-color: #a0aec0;
-}
-
-.copy-token-button.copied {
-  background-color: #c6f6d5;
-  color: #22543d;
-  border-color: #9ae6b4;
 }

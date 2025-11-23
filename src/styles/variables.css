@@ -1,0 +1,68 @@
+:root {
+  /* Primary Colors */
+  --color-primary: #467ee5;
+  --color-primary-light: #eef2ff;
+  --color-primary-active-border: #3182ce;
+
+  /* Text Colors */
+  --color-text-dark: #2d3748;
+  --color-text-medium: #4a5568;
+  --color-text-light: #718096;
+
+  /* Background Colors */
+  --color-bg-light: #f7fafc;
+  --color-bg-hover: #f1f5f9;
+  --color-bg-card: #ffffff;
+
+  /* Border Colors */
+  --color-border: #e2e8f0;
+
+  /* Status Colors */
+  --color-success: #10b981;
+  --color-danger: #ef4444;
+  --color-danger-light: #fee2e2;
+  --color-danger-dark: #c33;
+  --color-warning: #f97316;
+  --color-info: #3b82f6;
+
+  /* Gradient Colors */
+  --color-gradient-start: #667eea;
+  --color-gradient-end: #764ba2;
+
+  /* Neutral Colors */
+  --color-neutral-100: #f9f9f9;
+  --color-neutral-200: #f0f0f0;
+  --color-neutral-300: #e0e0e0;
+  --color-neutral-400: #ccc;
+  --color-neutral-500: #999;
+  --color-neutral-600: #666;
+  --color-neutral-700: #333;
+
+  /* Specific Component Colors */
+  --color-log-payload-bg: #2d2d2d;
+  --color-log-payload-text: #e0e0e0;
+  --color-log-payload-link: #0066cc;
+  --color-timeline-line: #eee;
+  --color-timeline-dot: #ddd;
+  --color-timeline-dot-active: #0066cc;
+  --color-timeline-dot-active-shadow: #cce0ff;
+  --color-timeline-dot-completed: #22c55e;
+  --color-timeline-dot-completed-shadow: #bbf7d0;
+  --color-timeline-dot-overdue: #ef4444;
+  --color-timeline-dot-overdue-shadow: #fecaca;
+  --color-task-card-active-bg: #f0f7ff;
+  --color-task-card-upcoming-border: #9ca3af;
+  --color-mini-task-bg: #e0f2fe;
+  --color-mini-task-text: #0369a1;
+  --color-mini-task-time: #0284c7;
+  --color-chat-user-bg: #3b82f6;
+  --color-chat-assistant-bg: #f1f5f9;
+  --color-chat-assistant-text: #334155;
+  --color-chat-tool-header: #64748b;
+  --color-chat-tool-output-bg: #1e293b;
+  --color-chat-tool-output-text: #e2e8f0;
+  --color-chat-loading-dot: #cbd5e1;
+
+  /* Common Colors */
+  --color-white: #ffffff;
+}

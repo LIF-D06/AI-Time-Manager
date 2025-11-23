@@ -215,30 +215,78 @@ export interface Task {
 
 export interface TasksResponse {
   tasks: Task[];
-  total: number;
-  limit: number;
-  offset: number;
 }
 
-export const getTasks = async (params?: { start?: string; end?: string; limit?: number; offset?: number; completed?: boolean }): Promise<TasksResponse> => {
-  const queryParams = new URLSearchParams();
-  if (params?.start) queryParams.append('start', params.start);
-  if (params?.end) queryParams.append('end', params.end);
-  if (params?.limit) queryParams.append('limit', params.limit.toString());
-  if (params?.offset) queryParams.append('offset', params.offset.toString());
-  if (params?.completed !== undefined) queryParams.append('completed', params.completed.toString());
+export interface MicrosoftTodoStatus {
+  connected: boolean;
+}
 
-  const response = await fetch(`${API_BASE_URL}/api/tasks?${queryParams.toString()}`, {
+export interface EbridgeStatus {
+  connected: boolean;
+}
+
+export const createTask = async (taskData: Omit<Task, 'id' | 'completed'>) => {
+  const token = getToken();
+  if (!token) throw new Error('用户未登录');
+
+  const response = await fetch('/api/tasks', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(taskData),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || '创建任务失败');
+  }
+
+  return await response.json();
+};
+
+export const updateTask = async (taskId: string, taskData: Partial<Omit<Task, 'id'>>): Promise<Task> => {
+  const token = getToken();
+  if (!token) throw new Error('用户未登录');
+
+  const response = await fetch(`/api/tasks/${taskId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(taskData),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || '更新任务失败');
+  }
+
+  return await response.json();
+};
+
+export const getTasks = async (params: { start: string; end: string; limit?: number }): Promise<TasksResponse> => {
+  const token = getToken();
+  if (!token) throw new Error('用户未登录');
+
+  const queryParams = new URLSearchParams();
+  queryParams.append('start', params.start);
+  queryParams.append('end', params.end);
+  if (params.limit) queryParams.append('limit', params.limit.toString());
+
+  const response = await fetch(`/api/tasks?${queryParams.toString()}`, {
     method: 'GET',
     headers: {
-      'Authorization': `Bearer ${getToken()}`,
+      'Authorization': `Bearer ${token}`,
     },
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || '获取任务失败');
+    const errorData = await response.json();
+    throw new Error(errorData.error || '获取任务失败');
   }
 
-  return response.json();
+  return await response.json();
 };

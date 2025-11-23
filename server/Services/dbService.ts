@@ -273,6 +273,38 @@ class DatabaseService {
               task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.id]
         );
     }
+
+    async patchTask(userId: string, taskId: string, updates: Partial<Task>, boundaryConflict?: boolean): Promise<Task> {
+        if (!this.db) throw new Error('Database not initialized');
+        const existingTask = await this.getTaskById(taskId);
+        if (!existingTask) throw new Error('Task not found');
+
+        const updatedTask = { ...existingTask, ...updates, id: taskId };
+
+        // 如果时间变更，执行冲突检测
+        if (updates.startTime || updates.endTime) {
+            const allTasks = await this.getTasksByUserId(userId);
+            const otherTasks = allTasks.filter(t => t.id !== taskId);
+            assertNoConflict(otherTasks, updatedTask, { boundaryConflict: boundaryConflict ?? false });
+        }
+
+        const fields = Object.keys(updates).filter(k => k !== 'id');
+        if (fields.length === 0) return existingTask;
+
+        const setClauses = fields.map(f => `${f} = ?`).join(', ');
+        const values = fields.map(f => {
+            const key = f as keyof typeof updates;
+            let value = updates[key];
+            if (typeof value === 'boolean') return value ? 1 : 0;
+            if (typeof value === 'object' && value !== null) return JSON.stringify(value);
+            return value;
+        });
+
+        const sql = `UPDATE tasks SET ${setClauses}, updatedAt = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?`;
+        await this.db.run(sql, [...values, taskId, userId]);
+
+        return await this.getTaskById(taskId) as Task;
+    }
     
     async getTasksByUserId(userId: string): Promise<Task[]> {
         if (!this.db) throw new Error('Database not initialized');

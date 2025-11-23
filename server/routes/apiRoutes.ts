@@ -338,6 +338,58 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
     }
   });
 
+  // 部分更新任务
+  router.patch('/tasks/:id', authenticateToken, async (req: any, res: any) => {
+    try {
+        const user = req.user as User;
+        const taskId = req.params.id;
+        const updates = req.body;
+
+        // 过滤掉不允许直接修改的字段
+        delete updates.id;
+        delete updates.userId;
+        delete updates.createdAt;
+        delete updates.updatedAt;
+
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ error: 'No update fields provided' });
+        }
+
+        const boundaryConflict = updates.boundaryConflict;
+        delete updates.boundaryConflict;
+
+        const existingTask = await dbService.getTaskById(taskId);
+        if (!existingTask) {
+            return res.status(404).json({ error: 'Task not found' });
+        }
+
+        const wasCompleted = existingTask.completed;
+
+        const updatedTask = await dbService.patchTask(user.id, taskId, updates, boundaryConflict);
+
+        broadcastTaskChange('updated', updatedTask, user.id);
+        await logUserEvent(user.id, 'taskUpdated', `Patched task ${updatedTask.name}`, { id: updatedTask.id, changes: updates });
+
+        if (updates.completed === true && !wasCompleted) {
+            broadcastTaskChange('completed', updatedTask, user.id);
+            await logUserEvent(user.id, 'taskCompleted', `Completed task ${updatedTask.name}`, { id: updatedTask.id });
+        }
+        
+        await dbService.refreshUserTasksIncremental(user, { updatedIds: [taskId] });
+
+        return res.status(200).json(updatedTask);
+    } catch (error: any) {
+        if (error instanceof ScheduleConflictError) {
+            return res.status(409).json({
+                error: 'Task time conflicts',
+                conflicts: error.conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
+            });
+        }
+        logger.error('Patch task failed:', error);
+        return res.status(500).json({ error: 'Failed to patch task' });
+    }
+  });
+
   // 删除任务（支持级联删除 cascade=true）
   router.delete('/tasks/:id', authenticateToken, async (req: any, res: any) => {
     try {

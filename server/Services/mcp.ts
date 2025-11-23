@@ -1,4 +1,3 @@
-
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express, { Request, Response } from 'express';
@@ -120,7 +119,42 @@ export function initializeMcpRoutes(app: express.Application, authenticateToken:
             }
         );
 
-        // 4. Get Schedule
+        // 4. Update Schedule
+        server.tool(
+            "update_schedule",
+            "Update an existing schedule/task",
+            {
+                taskId: z.string().describe("The ID of the task to update"),
+                name: z.string().optional().describe("New title of the task"),
+                startTime: z.string().optional().describe("New start time in ISO 8601 format"),
+                endTime: z.string().optional().describe("New end time in ISO 8601 format"),
+                description: z.string().optional().describe("New description of the task"),
+                completed: z.boolean().optional().describe("Whether the task is completed"),
+            },
+            async ({ taskId, name, startTime, endTime, description, completed }) => {
+                try {
+                    const updates: any = {};
+                    if (name !== undefined) updates.name = name;
+                    if (startTime !== undefined) updates.startTime = startTime;
+                    if (endTime !== undefined) updates.endTime = endTime;
+                    if (description !== undefined) updates.description = description;
+                    if (completed !== undefined) updates.completed = completed;
+
+                    if (Object.keys(updates).length === 0) {
+                        return { content: [{ type: "text", text: "No updates provided." }] };
+                    }
+
+                    const updatedTask = await dbService.patchTask(user.id, taskId, updates, !!user.conflictBoundaryInclusive);
+                    await dbService.refreshUserTasksIncremental(user, { updatedIds: [taskId] });
+                    
+                    return { content: [{ type: "text", text: `Task ${taskId} updated successfully.` }] };
+                } catch (error: any) {
+                    return { content: [{ type: "text", text: `Error updating task: ${error.message}` }] };
+                }
+            }
+        );
+
+        // 5. Get Schedule
         server.tool(
             "get_schedule",
             "Get schedules within a time range",
@@ -142,7 +176,7 @@ export function initializeMcpRoutes(app: express.Application, authenticateToken:
             }
         );
 
-        // 5. Get Server Time
+        // 6. Get Server Time
         server.tool(
             "get_server_time",
             "Get the current server time",

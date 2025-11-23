@@ -312,6 +312,20 @@ RecurrenceSummary（创建/批量创建响应中）:
 ### PUT /api/tasks/:id
 更新任务（含冲突检测）。若设置 `completed: true` 且先前为 false，将广播 `completed` 事件。
 
+### PATCH /api/tasks/:id
+部分更新任务。与 PUT 类似，但只更新提供的字段。
+请求体示例：
+```
+{
+  "completed": true,
+  "description": "Finished reading all chapters."
+}
+```
+成功响应：200
+```
+{ ...更新后的完整任务对象... }
+```
+
 ### DELETE /api/tasks/:id
 删除任务并广播 `deleted`。
 

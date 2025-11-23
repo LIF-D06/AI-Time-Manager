@@ -3,6 +3,11 @@ import { Send, Settings, Bot, User as UserIcon, Terminal } from 'lucide-react';
 import { SimpleMcpClient, type McpTool } from '../../services/SimpleMcpClient';
 import { chatCompletion, type ChatMessage, type LLMConfig } from '../../services/llmService';
 import { getToken } from '../../services/api';
+import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { Textarea } from '../ui/Textarea';
+import { Badge } from '../ui/Badge';
 import '../../styles/AIChat.css';
 
 const AIChat: React.FC = () => {
@@ -138,51 +143,53 @@ const AIChat: React.FC = () => {
   };
 
   return (
-    <div className="ai-chat-container">
-      <div className="chat-header">
-        <h2>
+    <Card className="ai-chat-container">
+      <CardHeader className="chat-header">
+        <CardTitle>
           <Bot size={24} /> AI 助手
-          <span className={`mcp-status ${mcpConnected ? 'connected' : ''}`}>
+          <Badge variant={mcpConnected ? 'success' : 'error'} style={{ marginLeft: '10px' }}>
             {mcpConnected ? 'MCP 已连接' : 'MCP 未连接'}
-          </span>
-        </h2>
-        <button className="settings-btn" onClick={() => setShowSettings(!showSettings)}>
-          <Settings size={18} /> 设置
-        </button>
-      </div>
+          </Badge>
+        </CardTitle>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => setShowSettings(!showSettings)}
+        >
+          <Settings size={18} style={{ marginRight: '6px' }} /> 设置
+        </Button>
+      </CardHeader>
 
       {showSettings && (
         <div className="settings-panel">
-          <form className="settings-form" onSubmit={handleSaveConfig}>
-            <div className="form-row">
-              <label>API Base URL</label>
-              <input 
-                type="text" 
-                value={config.baseUrl}
-                onChange={e => setConfig({...config, baseUrl: e.target.value})}
-                placeholder="https://api.openai.com/v1"
-              />
-            </div>
-            <div className="form-row">
-              <label>API Key</label>
-              <input 
-                type="password" 
-                value={config.apiKey}
-                onChange={e => setConfig({...config, apiKey: e.target.value})}
-                placeholder="sk-..."
-              />
-            </div>
-            <div className="form-row">
-              <label>Model Name</label>
-              <input 
-                type="text" 
-                value={config.model}
-                onChange={e => setConfig({...config, model: e.target.value})}
-                placeholder="gpt-3.5-turbo"
-              />
-            </div>
-            <button type="submit" className="save-btn">保存配置</button>
-          </form>
+          <Card>
+            <CardContent style={{ paddingTop: '20px' }}>
+              <form className="settings-form" onSubmit={handleSaveConfig}>
+                <Input
+                  label="API Base URL"
+                  type="text"
+                  value={config.baseUrl}
+                  onChange={e => setConfig({...config, baseUrl: e.target.value})}
+                  placeholder="https://api.openai.com/v1"
+                />
+                <Input
+                  label="API Key"
+                  type="password"
+                  value={config.apiKey}
+                  onChange={e => setConfig({...config, apiKey: e.target.value})}
+                  placeholder="sk-..."
+                />
+                <Input
+                  label="Model Name"
+                  type="text"
+                  value={config.model}
+                  onChange={e => setConfig({...config, model: e.target.value})}
+                  placeholder="gpt-3.5-turbo"
+                />
+                <Button type="submit">保存配置</Button>
+              </form>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -212,7 +219,7 @@ const AIChat: React.FC = () => {
                   <div className="tool-calls-preview">
                     {msg.tool_calls.map((tc: any, i: number) => (
                       <div key={i} className="tool-call-badge">
-                        🛠️ Calling: {tc.function.name}
+                        <Badge variant="info">🛠️ Calling: {tc.function.name}</Badge>
                       </div>
                     ))}
                   </div>
@@ -238,7 +245,7 @@ const AIChat: React.FC = () => {
 
       <div className="chat-input-area">
         <div className="input-wrapper">
-          <textarea
+          <Textarea
             className="chat-input"
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -250,13 +257,19 @@ const AIChat: React.FC = () => {
             }}
             placeholder="输入指令，例如：帮我把明天的会议加到日程里..."
             disabled={loading}
+            style={{ minHeight: '50px', height: '50px' }}
           />
-          <button className="send-btn" onClick={handleSend} disabled={loading || !input.trim()}>
+          <Button 
+            className="send-btn" 
+            onClick={handleSend} 
+            disabled={loading || !input.trim()}
+            style={{ height: '50px', width: '50px', padding: 0 }}
+          >
             <Send size={20} />
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Card>
   );
 };
 

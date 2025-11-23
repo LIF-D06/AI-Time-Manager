@@ -1,0 +1,9 @@
+.current-time-display {
+  font-family: 'Microsoft YaHei', sans-serif;
+  font-size: 1.7rem;
+  font-weight: 900;
+  color: var(--color-neutral-500);
+  min-width: 80px;
+  text-align: right;
+  letter-spacing: 0.5px;
+}

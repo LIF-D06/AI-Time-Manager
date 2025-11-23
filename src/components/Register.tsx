@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { register, setToken } from '../services/api';
+import { Card, CardHeader, CardTitle, CardContent } from './ui/Card';
+import { Input } from './ui/Input';
+import { Button } from './ui/Button';
 import '../styles/AuthForms.css';
 
 interface RegisterProps {
@@ -44,13 +47,15 @@ const Register: React.FC<RegisterProps> = ({ onRegisterSuccess }) => {
 
   return (
     <div className="auth-container">
-      <div className="auth-form">
-        <h2>注册</h2>
-        {error && <div className="error-message">{error}</div>}
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="name">姓名</label>
-            <input
+      <Card className="auth-card">
+        <CardHeader>
+          <CardTitle style={{ justifyContent: 'center' }}>注册</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error && <div className="error-message">{error}</div>}
+          <form onSubmit={handleSubmit}>
+            <Input
+              label="姓名"
               type="text"
               id="name"
               value={name}
@@ -58,10 +63,8 @@ const Register: React.FC<RegisterProps> = ({ onRegisterSuccess }) => {
               required
               autoComplete="name"
             />
-          </div>
-          <div className="form-group">
-            <label htmlFor="email">邮箱</label>
-            <input
+            <Input
+              label="邮箱"
               type="email"
               id="email"
               value={email}
@@ -69,10 +72,8 @@ const Register: React.FC<RegisterProps> = ({ onRegisterSuccess }) => {
               required
               autoComplete="email"
             />
-          </div>
-          <div className="form-group">
-            <label htmlFor="password">密码</label>
-            <input
+            <Input
+              label="密码"
               type="password"
               id="password"
               value={password}
@@ -80,10 +81,8 @@ const Register: React.FC<RegisterProps> = ({ onRegisterSuccess }) => {
               required
               autoComplete="new-password"
             />
-          </div>
-          <div className="form-group">
-            <label htmlFor="confirmPassword">确认密码</label>
-            <input
+            <Input
+              label="确认密码"
               type="password"
               id="confirmPassword"
               value={confirmPassword}
@@ -91,12 +90,12 @@ const Register: React.FC<RegisterProps> = ({ onRegisterSuccess }) => {
               required
               autoComplete="new-password"
             />
-          </div>
-          <button type="submit" className="auth-button" disabled={loading}>
-            {loading ? '注册中...' : '注册'}
-          </button>
-        </form>
-      </div>
+            <Button type="submit" className="auth-button-full" disabled={loading} style={{ width: '100%', marginTop: '10px' }}>
+              {loading ? '注册中...' : '注册'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 };
