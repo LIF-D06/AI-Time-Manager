@@ -19,7 +19,7 @@ import AllSchedule from './Schedule/AllSchedule';
 import TodaySchedule from './Schedule/TodaySchedule';
 import LogViewer from './Logs/LogViewer';
 import AIChat from './AIChat/AIChat';
-import { LayoutDashboard, Calendar, ListTodo, FileText, LogOut, MessageSquare, ChevronsLeft } from 'lucide-react';
+import { LayoutDashboard, Calendar, ListTodo, FileText, LogOut, MessageSquare, ChevronsLeft, Menu, X } from 'lucide-react';
 import '../styles/Dashboard.css';
 
 interface DashboardProps {
@@ -30,6 +30,8 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
   const navigate = useNavigate();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(window.innerWidth < 1024);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [ebPassword, setEbPassword] = useState('');
   const [password, setPassword] = useState('');
   const [email] = useState(localStorage.getItem('user_email') || '');
@@ -46,7 +48,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
 
   useEffect(() => {
     const handleResize = () => {
-      setIsSidebarCollapsed(window.innerWidth < 1024);
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) {
+        setIsMobileMenuOpen(false);
+        setIsSidebarCollapsed(window.innerWidth < 1024);
+      }
     };
 
     window.addEventListener('resize', handleResize);
@@ -86,6 +93,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
 
   const toggleSidebar = () => {
     setIsSidebarCollapsed(!isSidebarCollapsed);
+  };
+
+  const toggleMobileMenu = () => {
+    setIsMobileMenuOpen(!isMobileMenuOpen);
+  };
+
+  const handleNavClick = (path: string) => {
+    navigate(path);
+    setIsMobileMenuOpen(false);
   };
 
   const handleConnectMicrosoft = () => {
@@ -307,50 +323,78 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
     );
   };
 
+  const renderNavItems = () => (
+    <>
+      <button 
+        className={`nav-item ${view === 'today-schedule' ? 'active' : ''}`}
+        onClick={() => handleNavClick('/schedule/today')}
+      >
+        <ListTodo size={20} /> <span className="nav-text">今日日程</span>
+      </button>
+      <button 
+        className={`nav-item ${view === 'all-schedule' ? 'active' : ''}`}
+        onClick={() => handleNavClick('/schedule/all')}
+      >
+        <Calendar size={20} /> <span className="nav-text">全部日程</span>
+      </button>
+      <button 
+        className={`nav-item ${view === 'chat' ? 'active' : ''}`}
+        onClick={() => handleNavClick('/chat')}
+      >
+        <MessageSquare size={20} /> <span className="nav-text">AI 助手</span>
+      </button>
+      <button 
+        className={`nav-item ${view === 'logs' ? 'active' : ''}`}
+        onClick={() => handleNavClick('/logs')}
+      >
+        <FileText size={20} /> <span className="nav-text">系统日志</span>
+      </button>
+    </>
+  );
+
   return (
-    <div className={`dashboard-layout ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <h1 className="logo-text">时间锚</h1>
-          <button className="sidebar-toggle" onClick={toggleSidebar}>
-            <ChevronsLeft size={20} />
-          </button>
-        </div>
-        <nav className="sidebar-nav">
-          <button 
-            className={`nav-item ${view === 'today-schedule' ? 'active' : ''}`}
-            onClick={() => navigate('/schedule/today')}
-          >
-            <ListTodo size={20} /> <span className="nav-text">今日日程</span>
-          </button>
-          <button 
-            className={`nav-item ${view === 'all-schedule' ? 'active' : ''}`}
-            onClick={() => navigate('/schedule/all')}
-          >
-            <Calendar size={20} /> <span className="nav-text">全部日程</span>
-          </button>
-          <button 
-            className={`nav-item ${view === 'chat' ? 'active' : ''}`}
-            onClick={() => navigate('/chat')}
-          >
-            <MessageSquare size={20} /> <span className="nav-text">AI 助手</span>
-          </button>
-          <button 
-            className={`nav-item ${view === 'logs' ? 'active' : ''}`}
-            onClick={() => navigate('/logs')}
-          >
-            <FileText size={20} /> <span className="nav-text">系统日志</span>
-          </button>
-        </nav>
-        <div className="sidebar-footer">
-          <button 
-            className={`nav-item ${!view || view === 'dashboard' ? 'active' : ''}`}
-            onClick={() => navigate('/dashboard')}
-          >
-            <LayoutDashboard size={20} /> <span className="nav-text">设置</span>
-          </button>
-        </div>
-      </aside>
+    <div className={`dashboard-layout ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobile ? 'mobile-layout' : ''}`}>
+      {isMobile ? (
+        <header className={`mobile-header ${isMobileMenuOpen ? 'open' : ''}`}>
+          <div className="mobile-header-top">
+            <h1 className="logo-text">时间锚</h1>
+            <button className="mobile-menu-toggle" onClick={toggleMobileMenu}>
+              {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
+          </div>
+          <nav className={`mobile-nav ${isMobileMenuOpen ? 'open' : ''}`}>
+            {renderNavItems()}
+            <div className="mobile-nav-footer">
+              <button 
+                className={`nav-item ${!view || view === 'dashboard' ? 'active' : ''}`}
+                onClick={() => handleNavClick('/dashboard')}
+              >
+                <LayoutDashboard size={20} /> <span className="nav-text">设置</span>
+              </button>
+            </div>
+          </nav>
+        </header>
+      ) : (
+        <aside className="sidebar">
+          <div className="sidebar-header">
+            <h1 className="logo-text">时间锚</h1>
+            <button className="sidebar-toggle" onClick={toggleSidebar}>
+              <ChevronsLeft size={20} />
+            </button>
+          </div>
+          <nav className="sidebar-nav">
+            {renderNavItems()}
+          </nav>
+          <div className="sidebar-footer">
+            <button 
+              className={`nav-item ${!view || view === 'dashboard' ? 'active' : ''}`}
+              onClick={() => handleNavClick('/dashboard')}
+            >
+              <LayoutDashboard size={20} /> <span className="nav-text">设置</span>
+            </button>
+          </div>
+        </aside>
+      )}
 
       <main className="main-content">
         {renderMainContent()}

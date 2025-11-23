@@ -2,6 +2,16 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
+export const authEvents = new EventTarget();
+
+const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const response = await fetch(input, init);
+  if (response.status === 403) {
+    authEvents.dispatchEvent(new Event('unauthorized'));
+  }
+  return response;
+};
+
 // 存储JWT令牌
 export const setToken = (token: string): void => {
   localStorage.setItem('auth_token', token);
@@ -27,7 +37,7 @@ export interface RegisterData {
 }
 
 export const register = async (data: RegisterData): Promise<{ token: string }> => {
-  const response = await fetch(`${API_BASE_URL}/register`, {
+  const response = await customFetch(`${API_BASE_URL}/register`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -53,7 +63,7 @@ export interface LoginData {
 }
 
 export const login = async (data: LoginData): Promise<{ token: string }> => {
-  const response = await fetch(`${API_BASE_URL}/login`, {
+  const response = await customFetch(`${API_BASE_URL}/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -91,7 +101,7 @@ export interface UpdatePasswordData {
 }
 
 export const updateEbridgePassword = async (data: UpdatePasswordData): Promise<void> => {
-  const response = await fetch(`${API_BASE_URL}/updateEbridgePassword`, {
+  const response = await customFetch(`${API_BASE_URL}/updateEbridgePassword`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -115,7 +125,7 @@ export interface MicrosoftTodoStatus {
 }
 
 export const getMicrosoftTodoStatus = async (): Promise<MicrosoftTodoStatus> => {
-  const response = await fetch(`${API_BASE_URL}/api/status/microsoft-todo`, {
+  const response = await customFetch(`${API_BASE_URL}/api/status/microsoft-todo`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -142,7 +152,7 @@ export interface EbridgeStatus {
 }
 
 export const getEbridgeStatus = async (): Promise<EbridgeStatus> => {
-  const response = await fetch(`${API_BASE_URL}/api/status/ebridge`, {
+  const response = await customFetch(`${API_BASE_URL}/api/status/ebridge`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -183,7 +193,7 @@ export const getLogs = async (params?: { limit?: number; offset?: number; type?:
   if (params?.since) queryParams.append('since', params.since);
   if (params?.until) queryParams.append('until', params.until);
 
-  const response = await fetch(`${API_BASE_URL}/api/logs?${queryParams.toString()}`, {
+  const response = await customFetch(`${API_BASE_URL}/api/logs?${queryParams.toString()}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${getToken()}`,
@@ -229,7 +239,7 @@ export const createTask = async (taskData: Omit<Task, 'id' | 'completed'>) => {
   const token = getToken();
   if (!token) throw new Error('用户未登录');
 
-  const response = await fetch('/api/tasks', {
+  const response = await customFetch('/api/tasks', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -250,7 +260,7 @@ export const updateTask = async (taskId: string, taskData: Partial<Omit<Task, 'i
   const token = getToken();
   if (!token) throw new Error('用户未登录');
 
-  const response = await fetch(`/api/tasks/${taskId}`, {
+  const response = await customFetch(`/api/tasks/${taskId}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -276,7 +286,7 @@ export const getTasks = async (params: { start: string; end: string; limit?: num
   queryParams.append('end', params.end);
   if (params.limit) queryParams.append('limit', params.limit.toString());
 
-  const response = await fetch(`/api/tasks?${queryParams.toString()}`, {
+  const response = await customFetch(`/api/tasks?${queryParams.toString()}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,

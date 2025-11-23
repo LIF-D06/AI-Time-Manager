@@ -8,6 +8,7 @@ import { findConflictingTasks, ScheduleConflictError } from '../Services/schedul
 import { generateRecurrenceInstances, buildRecurrenceSummary } from '../Services/recurrence.js';
 import { broadcastTaskChange } from '../Services/websocket.js';
 import { logUserEvent } from '../Services/userLog.js';
+import { LLMApi } from '../Services/LLMApi.js';
 
 // 身份验证中间件引用
 export interface AuthMiddleware {
@@ -17,6 +18,39 @@ export interface AuthMiddleware {
 export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
   // 创建路由器 - 每次调用都创建新的实例
   const router = express.Router();
+
+  // 初始化 LLM API
+  const llmApi = new LLMApi(process.env.OPENAI_API_KEY || '', process.env.OPENAI_MODEL || 'deepseek-chat');
+
+  // LLM 聊天接口（流式）
+  router.post('/llm/chat', authenticateToken, async (req: any, res: any) => {
+    try {
+      const { messages, tools } = req.body;
+      if (!messages || !Array.isArray(messages)) {
+        return res.status(400).json({ error: 'messages array required' });
+      }
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      await llmApi.chatStream(messages, tools, (data) => {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      });
+
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch (error: any) {
+      logger.error('LLM chat failed:', error);
+      // 如果响应头还没发送，发送 JSON 错误
+      if (!res.headersSent) {
+        return res.status(500).json({ error: 'Failed to process chat request' });
+      }
+      // 如果已经开始流式传输，发送错误事件
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      res.end();
+    }
+  });
 
   // 查询MicrosoftTODO接口状态的API端点
   router.post('/status/microsoft-todo', authenticateToken, async (req: any, res: any) => {

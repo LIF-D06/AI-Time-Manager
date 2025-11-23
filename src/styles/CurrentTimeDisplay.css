@@ -7,3 +7,9 @@
   text-align: right;
   letter-spacing: 0.5px;
 }
+
+@media (max-width: 768px) {
+  .current-time-display {
+    display: none;
+  }
+}

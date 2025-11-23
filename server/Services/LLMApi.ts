@@ -202,4 +202,38 @@ export class LLMApi {
             return { importance: 'medium', reason: '无法分析重要性' };
         }
     }
+
+    /**
+     * 通用聊天接口，支持流式输出
+     * @param messages 聊天消息历史
+     * @param tools 可选的工具列表
+     * @param onData 接收流式数据的回调函数
+     */
+    async chatStream(messages: any[], tools: any[] | undefined, onData: (data: { content?: string, tool_calls?: any[] }) => void): Promise<void> {
+        try {
+            const stream = await this.openai.chat.completions.create({
+                model: this.model,
+                messages: messages,
+                tools: tools,
+                stream: true,
+                temperature: 0.7,
+            });
+
+            for await (const chunk of stream) {
+                const delta = chunk.choices[0]?.delta;
+                if (delta) {
+                    const data: any = {};
+                    if (delta.content) data.content = delta.content;
+                    if (delta.tool_calls) data.tool_calls = delta.tool_calls;
+                    
+                    if (Object.keys(data).length > 0) {
+                        onData(data);
+                    }
+                }
+            }
+        } catch (error: any) {
+            logger.error(`OpenAI API 流式调用失败: ${error.message || '未知错误'}`);
+            throw error;
+        }
+    }
 }

@@ -12,18 +12,22 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 20px;
+  flex-wrap: wrap;
 }
 
 .header-right {
   display: flex;
   align-items: center;
   gap: 20px;
+  flex-wrap: wrap;
 }
 
 .current-time {
@@ -302,6 +306,18 @@
   gap: 4px;
 }
 
+.task-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.task-name {
+  word-break: break-word;
+}
+
 .task-time {
   font-size: 0.7rem;
   color: var(--color-mini-task-time);
@@ -369,4 +385,38 @@
   justify-content: flex-end;
   gap: 1rem;
   margin-top: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .date-subtitle,
+  .current-date-label {
+    display: none;
+  }
+
+  .header-left {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  /* Fix for TodaySchedule to prevent unnecessary wrapping */
+  .today-header .header-left,
+  .today-header .header-right {
+    width: auto;
+  }
+
+  /* Make Add Schedule button same size as Week View button (sm) on mobile */
+  .schedule-header .add-schedule-btn {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+  }
+  
+  .schedule-header .add-schedule-btn svg {
+    width: 16px;
+    height: 16px;
+  }
 }

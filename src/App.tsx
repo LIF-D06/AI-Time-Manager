@@ -1,21 +1,27 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { isAuthenticated, removeToken, authEvents } from './services/api';
 import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
-import AllSchedule from './components/Schedule/AllSchedule';
-import TodaySchedule from './components/Schedule/TodaySchedule';
-import LogViewer from './components/Logs/LogViewer';
-import { isAuthenticated } from './services/api';
+import { Modal } from './components/ui/Modal';
+import { Button } from './components/ui/Button';
 import './App.css';
 
 function App() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAuth, setIsAuth] = useState(false);
+  const [isAuth, setIsAuth] = useState<boolean>(isAuthenticated());
+  const [showSessionExpiredModal, setShowSessionExpiredModal] = useState(false);
 
   useEffect(() => {
-    setIsAuth(isAuthenticated());
-    setIsLoading(false);
+    const handleUnauthorized = () => {
+      setShowSessionExpiredModal(true);
+    };
+    
+    authEvents.addEventListener('unauthorized', handleUnauthorized);
+    
+    return () => {
+      authEvents.removeEventListener('unauthorized', handleUnauthorized);
+    };
   }, []);
 
   const handleLoginSuccess = () => {
@@ -23,37 +29,70 @@ function App() {
   };
 
   const handleLogout = () => {
+    removeToken();
     setIsAuth(false);
   };
 
-  if (isLoading) {
-    return (
-      <div className="loading">
-        <div className="loading-spinner"></div>
-        <p>加载中...</p>
-      </div>
-    );
-  }
+  const handleSessionExpired = () => {
+    setShowSessionExpiredModal(false);
+    handleLogout();
+  };
 
   return (
     <Router>
-      <div className="app">
+      <div className="app-container">
         <Routes>
-          <Route path="/login" element={!isAuth ? <Login onLoginSuccess={handleLoginSuccess} /> : <Navigate to="/dashboard" />} />
-          <Route path="/register" element={!isAuth ? <Register onRegisterSuccess={handleLoginSuccess} /> : <Navigate to="/dashboard" />} />
+          <Route 
+            path="/login" 
+            element={!isAuth ? <Login onLoginSuccess={handleLoginSuccess} /> : <Navigate to="/" />} 
+          />
+          <Route 
+            path="/register" 
+            element={!isAuth ? <Register onRegisterSuccess={handleLoginSuccess} /> : <Navigate to="/" />} 
+          />
           
-          <Route path="/dashboard" element={isAuth ? <Dashboard onLogout={handleLogout} /> : <Navigate to="/login" />}>
-             {/* Dashboard will handle sub-routes or we can define them here if Dashboard has an Outlet */}
-          </Route>
+          <Route 
+            path="/" 
+            element={isAuth ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/dashboard" 
+            element={isAuth ? <Dashboard onLogout={handleLogout} view="dashboard" /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/schedule/today" 
+            element={isAuth ? <Dashboard onLogout={handleLogout} view="today-schedule" /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/schedule/all" 
+            element={isAuth ? <Dashboard onLogout={handleLogout} view="all-schedule" /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/chat" 
+            element={isAuth ? <Dashboard onLogout={handleLogout} view="chat" /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/logs" 
+            element={isAuth ? <Dashboard onLogout={handleLogout} view="logs" /> : <Navigate to="/login" />} 
+          />
           
-          {/* We might need to restructure Dashboard to be a layout or include navigation */}
-          <Route path="/schedule/all" element={isAuth ? <Dashboard onLogout={handleLogout} view="all-schedule" /> : <Navigate to="/login" />} />
-          <Route path="/schedule/today" element={isAuth ? <Dashboard onLogout={handleLogout} view="today-schedule" /> : <Navigate to="/login" />} />
-          <Route path="/logs" element={isAuth ? <Dashboard onLogout={handleLogout} view="logs" /> : <Navigate to="/login" />} />
-          <Route path="/chat" element={isAuth ? <Dashboard onLogout={handleLogout} view="chat" /> : <Navigate to="/login" />} />
-
-          <Route path="/" element={<Navigate to={isAuth ? "/dashboard" : "/login"} />} />
+          <Route 
+            path="*" 
+            element={isAuth ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} 
+          />
         </Routes>
+        
+        <Modal
+          isOpen={showSessionExpiredModal}
+          onClose={() => {}} // Prevent closing by clicking outside
+          title="会话已过期"
+          closeOnOverlayClick={false}
+        >
+          <p>您的登录会话已过期，请重新登录。</p>
+          <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={handleSessionExpired}>重新登录</Button>
+          </div>
+        </Modal>
       </div>
     </Router>
   );

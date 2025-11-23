@@ -76,7 +76,7 @@ const TodaySchedule: React.FC = () => {
   return (
     <>
       <Card className="schedule-container">
-        <CardHeader className="schedule-header">
+        <CardHeader className="schedule-header today-header">
           <div className="header-left">
             <CardTitle>今日日程</CardTitle>
             <p className="date-subtitle">{format(new Date(), 'yyyy年MM月dd日 EEEE', { locale: zhCN })}</p>

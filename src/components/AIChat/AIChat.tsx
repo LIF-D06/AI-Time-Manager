@@ -12,7 +12,7 @@ import '../../styles/AIChat.css';
 
 const AIChat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: '你好！我是你的日程助手。我可以帮你管理日程、查看邮件等。请先在设置中配置你的大模型 API。' }
+    { role: 'assistant', content: '你好！我是你的日程助手。我可以帮你管理日程、查看邮件等。需要我帮你做什么尽管说出来吧！' }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -66,10 +66,11 @@ const AIChat: React.FC = () => {
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
-    if (!config.apiKey) {
-      setShowSettings(true);
-      return;
-    }
+    // Remove the check for apiKey to allow fallback to server LLM
+    // if (!config.apiKey) {
+    //   setShowSettings(true);
+    //   return;
+    // }
 
     const userMsg: ChatMessage = { role: 'user', content: input };
     setMessages(prev => [...prev, userMsg]);
@@ -255,7 +256,7 @@ const AIChat: React.FC = () => {
                 handleSend();
               }
             }}
-            placeholder="输入指令，例如：帮我把明天的会议加到日程里..."
+            placeholder="e.g. 帮我添加最近邮件中的日程"
             disabled={loading}
             style={{ minHeight: '50px', height: '50px' }}
           />

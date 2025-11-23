@@ -9,7 +9,7 @@ import AddTaskModal from './AddTaskModal';
 import '../../styles/Schedule.css';
 
 const AllSchedule: React.FC = () => {
-  const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
+  const [viewMode, setViewMode] = useState<'month' | 'week'>(window.innerWidth < 768 ? 'week' : 'month');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
@@ -87,8 +87,10 @@ const AllSchedule: React.FC = () => {
               {dayTasks.map(task => (
                 <div key={task.id} className="mini-task" title={task.name}>
                   <span className="task-dot"></span>
-                  {viewMode === 'week' && <span className="task-time">{format(parseISO(task.startTime), 'HH:mm')}</span>}
-                  {task.name}
+                  <div className="task-info">
+                    {viewMode === 'week' && <span className="task-time">{format(parseISO(task.startTime), 'HH:mm')}</span>}
+                    <span className="task-name">{task.name}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -139,7 +141,7 @@ const AllSchedule: React.FC = () => {
               </span>
               <Button variant="ghost" size="sm" onClick={() => navigate('next')}><ChevronRight size={20} /></Button>
             </div>
-            <Button onClick={() => setIsModalOpen(true)}>
+            <Button className="add-schedule-btn" onClick={() => setIsModalOpen(true)}>
               <Plus size={18} /> 添加日程
             </Button>
           </div>

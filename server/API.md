@@ -342,6 +342,28 @@ RecurrenceSummary（创建/批量创建响应中）:
 
 ---
 
+## LLM 聊天 API（需 Authorization: Bearer <JWT>）
+
+### POST /api/llm/chat
+使用服务端配置的 LLM 进行流式聊天。客户端无需提供 API Key。
+
+请求体（JSON）：
+```
+{
+  "messages": [
+    { "role": "system", "content": "You are a helpful assistant." },
+    { "role": "user", "content": "Hello!" }
+  ]
+}
+```
+
+响应：Server-Sent Events (SSE) 流
+- 每个数据块格式：`data: {"content": "..."}`
+- 结束标志：`data: [DONE]`
+- 错误：`data: {"error": "..."}`
+
+---
+
 ## 用户日志 API（需 Authorization: Bearer <JWT>）
 
 ### GET /api/logs
