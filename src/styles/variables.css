@@ -72,4 +72,8 @@
   --color-outline-active: #e2e8f0;
   --color-ghost-active: #e2e8f0;
   --color-danger-active: #b91c1c;
+
+  /* Responsive Breakpoints */
+  --breakpoint-mobile: 768px;
+  --breakpoint-tablet: 1024px;
 }

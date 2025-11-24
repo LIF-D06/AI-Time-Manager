@@ -33,11 +33,20 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
   const navigate = useNavigate();
+  
+  // Get breakpoint from CSS variables
+  const getMobileBreakpoint = () => {
+    const root = document.documentElement;
+    const breakpoint = getComputedStyle(root).getPropertyValue('--breakpoint-mobile').trim();
+    return parseInt(breakpoint) || 768;
+  };
+  
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    const isMobileView = window.innerWidth < 768;
+    const mobileBreakpoint = getMobileBreakpoint();
+    const isMobileView = window.innerWidth < mobileBreakpoint;
     return !isMobileView && window.innerWidth < 1024;
   });
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < getMobileBreakpoint());
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [ebPassword, setEbPassword] = useState('');
   const [password, setPassword] = useState('');
@@ -60,7 +69,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
 
   useEffect(() => {
     const handleResize = () => {
-      const mobile = window.innerWidth < 768;
+      const mobileBreakpoint = getMobileBreakpoint();
+      const mobile = window.innerWidth < mobileBreakpoint;
       setIsMobile(mobile);
       if (!mobile) {
         setIsMobileMenuOpen(false);
