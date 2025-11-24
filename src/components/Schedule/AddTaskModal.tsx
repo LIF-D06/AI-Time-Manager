@@ -199,11 +199,21 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
         };
       }
 
-      await createTask(taskData);
-      onTaskCreated();
-      handleClose();
+      const result = await createTask(taskData);
+      
+      if (result.conflictWarning) {
+        setConflictTasks(result.conflictWarning.conflicts);
+        setShowConflictModal(true);
+        onTaskCreated();
+        // Don't close the modal immediately so the conflict modal can be seen
+        // We will close it when the conflict modal is closed
+      } else {
+        onTaskCreated();
+        handleClose();
+      }
     } catch (error) {
       console.error('Failed to create task', error);
+      // ScheduleConflictError is no longer thrown for conflicts, but keep for safety
       if (error instanceof ScheduleConflictError) {
         setConflictTasks(error.conflicts);
         setShowConflictModal(true);
@@ -213,6 +223,11 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleConflictModalClose = () => {
+    setShowConflictModal(false);
+    handleClose();
   };
 
   return (
@@ -345,16 +360,16 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
 
       <Modal
         isOpen={showConflictModal}
-        onClose={() => setShowConflictModal(false)}
+        onClose={handleConflictModalClose}
         title="日程冲突提醒"
         footer={
-          <Button onClick={() => setShowConflictModal(false)}>
-            返回修改
+          <Button onClick={handleConflictModalClose}>
+            我知道了
           </Button>
         }
       >
         <p style={{ marginBottom: '1rem', color: 'var(--color-text-medium)' }}>
-          检测到当前时间段与以下日程存在冲突，请调整时间：
+          日程已添加，但与以下日程存在时间冲突：
         </p>
         <div className="conflict-list" style={{ maxHeight: '200px', overflowY: 'auto' }}>
           {conflictTasks.map(task => (

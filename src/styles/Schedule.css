@@ -169,11 +169,23 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+  gap: 8px;
 }
 
 .task-header h3 {
   margin: 0;
   font-size: 1.1rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-header .icon-completed,
+.task-header .icon-pending {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
 }
 
 .task-desc {
@@ -392,26 +404,435 @@
   color: var(--color-neutral-600);
 }
 
-.timeline-view .empty-state button {
-  background-color: var(--color-primary);
-  color: var(--color-white);
-  border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background-color 0.2s;
-}
-
-.timeline-view .empty-state button:hover {
-  background-color: var(--color-primary-dark);
-}
-
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 1rem;
   margin-top: 1.5rem;
+}
+
+/* Precise Timeline Styles */
+.day-view-container {
+  position: relative;
+  height: 1440px; /* 24 hours * 60px/hour */
+  background: var(--color-bg-light);
+  margin-top: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+
+.time-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--color-border-light);
+  display: flex;
+  align-items: flex-start;
+}
+
+.time-slot:first-child {
+  border-top: none;
+}
+
+.time-label {
+  width: 60px;
+  text-align: right;
+  padding-right: 10px;
+  color: var(--color-text-light);
+  font-size: 0.8rem;
+  transform: translateY(-50%);
+  background: var(--color-bg-light); /* Cover border */
+}
+
+.time-grid-line {
+  flex: 1;
+  height: 1px;
+  background: transparent; /* Border is on parent */
+}
+
+.absolute-task {
+  position: absolute;
+  left: 70px; /* Time label width + gap */
+  right: 10px;
+  background: var(--color-primary-light);
+  border-left: 4px solid var(--color-primary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 10;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.absolute-task:hover {
+  z-index: 20;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.absolute-task.completed {
+  opacity: 0.6;
+  background: var(--color-bg-secondary);
+  border-left-color: var(--color-text-light);
+}
+
+.absolute-task-content {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-text-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.absolute-task-time {
+  font-size: 0.75rem;
+  color: var(--color-text-medium);
+}
+
+.current-time-line {
+  position: absolute;
+  left: 60px;
+  right: 0;
+  height: 2px;
+  background: #ef4444; /* Red color */
+  z-index: 30;
+  pointer-events: none;
+}
+
+.current-time-line::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+/* Current Time Indicator in List View */
+.timeline-current-time-indicator {
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+  position: relative;
+}
+
+.time-line-left {
+  width: 60px;
+  text-align: right;
+  padding-right: 15px;
+}
+
+.current-time-label {
+  color: #ef4444;
+  font-weight: bold;
+  font-size: 0.9rem;
+  background: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #ef4444;
+}
+
+.time-line-divider {
+  flex: 1;
+  height: 2px;
+  background: #ef4444;
+  position: relative;
+}
+
+.time-line-divider::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+/* Active Task Indicator Overlay */
+.active-task-indicator-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(239, 68, 68, 0.5);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.active-time-dot {
+  position: absolute;
+  left: -6px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* Week View Current Time Marker */
+.week-view-current-time-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.marker-line {
+  width: 100%;
+  height: 2px;
+  background: #ef4444;
+}
+
+.marker-dot {
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+/* Week View with Timeline Layout */
+.week-view-layout {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-white);
+}
+
+.week-view-header {
+  display: flex;
+  border-bottom: 2px solid var(--color-border);
+  background: var(--color-bg-light);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.time-axis-header {
+  width: 60px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+}
+
+.week-header-day {
+  flex: 1;
+  text-align: center;
+  padding: 12px 8px;
+  border-right: 1px solid var(--color-border);
+  transition: background 0.2s;
+}
+
+.week-header-day:last-child {
+  border-right: none;
+}
+
+.week-header-day.today {
+  background: #fef3c7;
+}
+
+.week-day-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--color-text-medium);
+  margin-bottom: 4px;
+}
+
+.week-day-date {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: var(--color-text-dark);
+}
+
+.week-header-day.today .week-day-date {
+  color: #d97706;
+}
+
+.week-view-body {
+  flex: 1;
+  display: flex;
+  overflow-y: auto;
+  position: relative;
+}
+
+.time-axis {
+  width: 60px;
+  flex-shrink: 0;
+  position: sticky;
+  left: 0;
+  z-index: 40;
+  background: var(--color-bg-light);
+  border-right: 1px solid var(--color-border);
+}
+
+.time-axis .time-label {
+  position: absolute;
+  width: 100%;
+  height: 60px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding-right: 8px;
+  padding-top: 2px;
+}
+
+.time-axis .time-label span {
+  font-size: 0.75rem;
+  color: var(--color-text-light);
+  transform: translateY(-50%);
+  background: var(--color-bg-light);
+  padding: 2px 4px;
+}
+
+.week-grid {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-height: 1440px; /* 24 hours * 60px */
+}
+
+.grid-line-horizontal {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  border-top: 1px solid var(--color-border-light);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.day-column {
+  flex: 1;
+  position: relative;
+  border-right: 1px solid var(--color-border-light);
+}
+
+.day-column:last-child {
+  border-right: none;
+}
+
+.day-column.today-column {
+  background: #fffbeb;
+}
+
+.day-column .absolute-task {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-radius: 4px;
+  padding: 5px 6px;
+  cursor: pointer;
+  z-index: 10;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: all 0.2s;
+  border-left-width: 3px;
+  display: flex;
+  flex-direction: column;
+  min-height: 28px;
+  box-sizing: border-box;
+}
+
+.day-column .absolute-task.compact-task {
+  padding: 4px 5px;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.day-column .absolute-task:hover {
+  z-index: 20;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  transform: scale(1.02);
+}
+
+.day-column .absolute-task .task-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.day-column .absolute-task .task-name {
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  flex-shrink: 0;
+  word-break: break-word;
+}
+
+.day-column .absolute-task.compact-task .task-name {
+  font-size: 0.7rem;
+  line-height: 1.3;
+  -webkit-line-clamp: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  max-height: 18px;
+}
+
+.day-column .absolute-task .task-description {
+  font-size: 0.7rem;
+  opacity: 0.75;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  flex: 1;
+  min-height: 0;
+  word-break: break-word;
+  margin-top: 2px;
+}
+
+.day-column .absolute-task .task-time-label {
+  font-size: 0.65rem;
+  opacity: 0.8;
+  font-weight: 600;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.day-column .absolute-task.compact-task .task-description,
+.day-column .absolute-task.compact-task .task-time-label {
+  display: none;
+}
+
+.current-time-marker-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ef4444;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.current-time-marker-line .marker-dot {
+  position: absolute;
+  left: -5px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #fff;
 }
 
 @media (max-width: 768px) {
@@ -464,6 +885,68 @@
 
   .mini-task .task-dot {
     display: none;
+  }
+
+  /* Week View: Reduce time axis width on mobile */
+  .time-axis-header,
+  .time-axis {
+    width: 40px;
+  }
+
+  .time-axis .time-label {
+    padding-right: 4px;
+  }
+
+  .time-axis .time-label span {
+    font-size: 0.65rem;
+    padding: 1px 2px;
+  }
+
+  /* Today Schedule: Reduce time column width */
+  .time-column {
+    width: 40px;
+    padding-right: 10px;
+  }
+
+  .time-line-left {
+    width: 40px;
+    padding-right: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Hide time axis completely on very narrow screens */
+  .time-axis-header,
+  .time-axis {
+    display: none;
+  }
+
+  .time-column {
+    display: none;
+  }
+
+  .time-line-left {
+    display: none;
+  }
+
+  .timeline-item::before {
+    display: none;
+  }
+
+  .content-column {
+    padding-left: 0;
+  }
+
+  .content-column::before {
+    display: none;
+  }
+
+  .timeline-current-time-indicator {
+    padding-left: 0;
+  }
+
+  .time-line-divider {
+    margin-left: 0;
   }
 }
 
@@ -566,6 +1049,11 @@
   padding-left: 40px;
   height: 42px;
   transition: all 0.2s;
+  box-shadow: none;
+}
+
+.search-input-container .ui-input:focus {
+  box-shadow: 0 0 0 2px rgba(70, 134, 229, 0.2);
 }
 
 .search-icon {

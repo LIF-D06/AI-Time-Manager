@@ -249,11 +249,13 @@ class DatabaseService {
         return users;
     }
     
-    async addTask(userId: string, task: Task, boundaryConflict?: boolean): Promise<void> {
+    async addTask(userId: string, task: Task, boundaryConflict?: boolean, allowConflict: boolean = false): Promise<void> {
         if (!this.db) throw new Error('Database not initialized');
         // 冲突检测：在写入前基于当前用户的任务进行时段冲突检查
         const existing = await this.getTasksByUserId(userId);
-        assertNoConflict(existing, task, { boundaryConflict: boundaryConflict ?? false });
+        if (!allowConflict) {
+            assertNoConflict(existing, task, { boundaryConflict: boundaryConflict ?? false });
+        }
         
         await this.db.run(
             `INSERT INTO tasks 
@@ -268,7 +270,7 @@ class DatabaseService {
         await this.addUserLog(userId, 'task_created', `Created task ${task.name}`, { taskId: task.id, name: task.name });
     }
     
-    async updateTask(task: Task, boundaryConflict?: boolean): Promise<void> {
+    async updateTask(task: Task, boundaryConflict?: boolean, allowConflict: boolean = false): Promise<void> {
         if (!this.db) throw new Error('Database not initialized');
         // 在更新任务前执行冲突检测：需要找出该任务所属用户的所有其他任务
         const row = await this.db.get('SELECT userId FROM tasks WHERE id = ?', [task.id]);
@@ -276,7 +278,9 @@ class DatabaseService {
             const existing = await this.getTasksByUserId(row.userId);
             // 排除自身后进行冲突检测
             const others = existing.filter(t => t.id !== task.id);
-            assertNoConflict(others, task, { boundaryConflict: boundaryConflict ?? false });
+            if (!allowConflict) {
+                assertNoConflict(others, task, { boundaryConflict: boundaryConflict ?? false });
+            }
         }
         await this.db.run(
             `UPDATE tasks 
@@ -290,7 +294,7 @@ class DatabaseService {
         );
     }
 
-    async patchTask(userId: string, taskId: string, updates: Partial<Task>, boundaryConflict?: boolean): Promise<Task> {
+    async patchTask(userId: string, taskId: string, updates: Partial<Task>, boundaryConflict?: boolean, allowConflict: boolean = false): Promise<Task> {
         if (!this.db) throw new Error('Database not initialized');
         const existingTask = await this.getTaskById(taskId);
         if (!existingTask) throw new Error('Task not found');
@@ -301,7 +305,9 @@ class DatabaseService {
         if (updates.startTime || updates.endTime) {
             const allTasks = await this.getTasksByUserId(userId);
             const otherTasks = allTasks.filter(t => t.id !== taskId);
-            assertNoConflict(otherTasks, updatedTask, { boundaryConflict: boundaryConflict ?? false });
+            if (!allowConflict) {
+                assertNoConflict(otherTasks, updatedTask, { boundaryConflict: boundaryConflict ?? false });
+            }
         }
 
         const fields = Object.keys(updates).filter(k => k !== 'id');
@@ -555,6 +561,25 @@ class DatabaseService {
         }
 
         return success;
+    }
+    
+    async deleteTasksByPattern(userId: string, pattern: string): Promise<number> {
+        if (!this.db) throw new Error('Database not initialized');
+        
+        // Get IDs to be deleted for logging
+        const rows = await this.db.all('SELECT id FROM tasks WHERE userId = ? AND id LIKE ?', [userId, pattern]);
+        const ids = rows.map((r: any) => r.id);
+        
+        if (ids.length === 0) return 0;
+
+        const result: any = await this.db.run('DELETE FROM tasks WHERE userId = ? AND id LIKE ?', [userId, pattern]);
+        const count = result?.changes || 0;
+
+        if (count > 0) {
+            await this.addUserLog(userId, 'tasks_deleted_pattern', `Deleted ${count} tasks matching pattern ${pattern}`, { pattern, count, deletedIds: ids });
+        }
+
+        return count;
     }
     
     private mapRowToUser(row: any, tasks: Task[]): User {

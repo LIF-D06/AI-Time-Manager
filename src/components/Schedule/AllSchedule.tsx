@@ -16,6 +16,12 @@ const AllSchedule: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchTasks = async () => {
     setLoading(true);
@@ -54,6 +60,92 @@ const AllSchedule: React.FC = () => {
     }
   };
 
+  const renderWeekView = () => {
+    const startDate = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const weekDays = Array.from({ length: 7 }).map((_, i) => addDays(startDate, i));
+
+    return (
+      <div className="week-view-layout">
+        <div className="week-view-header">
+          <div className="time-axis-header"></div>
+          {weekDays.map(day => (
+            <div key={day.toString()} className={`week-header-day ${isSameDay(day, new Date()) ? 'today' : ''}`}>
+              <div className="week-day-name">{format(day, 'EEE', { locale: zhCN })}</div>
+              <div className="week-day-date">{format(day, 'd')}</div>
+            </div>
+          ))}
+        </div>
+        <div className="week-view-body">
+          <div className="time-axis">
+            {Array.from({ length: 24 }).map((_, i) => (
+              <div key={i} className="time-label" style={{ top: `${i * 60}px` }}>
+                <span>{i}:00</span>
+              </div>
+            ))}
+          </div>
+          <div className="week-grid">
+            {/* Horizontal Grid Lines */}
+            {Array.from({ length: 24 }).map((_, i) => (
+              <div key={i} className="grid-line-horizontal" style={{ top: `${i * 60}px` }}></div>
+            ))}
+            
+            {/* Day Columns */}
+            {weekDays.map(day => {
+              const dayTasks = tasks.filter(t => isSameDay(parseISO(t.startTime), day));
+              const isToday = isSameDay(day, new Date());
+              
+              return (
+                <div key={day.toString()} className={`day-column ${isToday ? 'today-column' : ''}`}>
+                  {dayTasks.map(task => {
+                    const start = parseISO(task.startTime);
+                    const end = parseISO(task.endTime);
+                    const startMinutes = start.getHours() * 60 + start.getMinutes();
+                    const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
+                    const taskHeight = Math.max(durationMinutes - 3, 28);
+                    
+                    return (
+                      <div
+                        key={task.id}
+                        className={`mini-task absolute-task importance-${task.importance || 'normal'} ${task.completed ? 'task-completed' : ''} ${taskHeight < 40 ? 'compact-task' : ''}`}
+                        style={{
+                          top: `${startMinutes}px`,
+                          height: `${taskHeight}px`,
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTask(task);
+                        }}
+                        title={`${task.name}${task.description ? '\n' + task.description : ''}\n${format(start, 'HH:mm')} - ${format(end, 'HH:mm')}`}
+                      >
+                        <div className="task-content-wrapper">
+                           <span className="task-name">{task.name}</span>
+                           {task.description && durationMinutes > 30 && (
+                             <span className="task-description">{task.description}</span>
+                           )}
+                           {durationMinutes > 20 && <span className="task-time-label">{format(start, 'HH:mm')}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Current Time Line if today */}
+                  {isToday && (
+                     <div 
+                       className="current-time-marker-line"
+                       style={{ top: `${currentTime.getHours() * 60 + currentTime.getMinutes()}px` }}
+                     >
+                       <div className="marker-dot"></div>
+                     </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderCalendar = () => {
     let startDate, endDate;
     
@@ -78,14 +170,25 @@ const AllSchedule: React.FC = () => {
         const cloneDay = day;
         const dayTasks = tasks.filter(t => isSameDay(parseISO(t.startTime), cloneDay));
         const isCurrentMonth = viewMode === 'week' ? true : isSameMonth(day, startOfMonth(currentDate));
+        const isToday = isSameDay(day, new Date());
         
         days.push(
           <div
-            className={`calendar-day ${!isCurrentMonth ? 'disabled' : ''} ${isSameDay(day, new Date()) ? 'today' : ''}`}
+            className={`calendar-day ${!isCurrentMonth ? 'disabled' : ''} ${isToday ? 'today' : ''}`}
             key={day.toString()}
           >
             <span className="day-number">{formattedDate}</span>
             <div className="day-tasks">
+              {/* Current Time Line for Today in Week View */}
+              {isToday && viewMode === 'week' && (
+                <div className="week-view-current-time-marker" style={{
+                  top: `${(currentTime.getHours() * 60 + currentTime.getMinutes()) / (24 * 60) * 100}%`
+                }}>
+                  <div className="marker-line"></div>
+                  <div className="marker-dot"></div>
+                </div>
+              )}
+              
               {dayTasks.map(task => (
                 <div 
                   key={task.id} 
@@ -157,15 +260,19 @@ const AllSchedule: React.FC = () => {
           </div>
         </CardHeader>
 
-        <CardContent className="calendar-view-wrapper">
-          <div className="calendar-view">
-            <div className="calendar-header">
-              {['一', '二', '三', '四', '五', '六', '日'].map(d => (
-                <div key={d} className="week-day">{d}</div>
-              ))}
+        <CardContent className="calendar-view-wrapper" style={viewMode === 'week' ? { padding: 0 } : {}}>
+          {viewMode === 'week' ? (
+            loading ? <div className="loading-overlay">加载中...</div> : renderWeekView()
+          ) : (
+            <div className="calendar-view">
+              <div className="calendar-header">
+                {['一', '二', '三', '四', '五', '六', '日'].map(d => (
+                  <div key={d} className="week-day">{d}</div>
+                ))}
+              </div>
+              {loading ? <div className="loading-overlay">加载中...</div> : renderCalendar()}
             </div>
-            {loading ? <div className="loading-overlay">加载中...</div> : renderCalendar()}
-          </div>
+          )}
         </CardContent>
       </Card>
       <AddTaskModal

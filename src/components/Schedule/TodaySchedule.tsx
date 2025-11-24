@@ -18,6 +18,12 @@ const TodaySchedule: React.FC = () => {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskToComplete, setTaskToComplete] = useState<Task | null>(null);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchTodayTasks = async () => {
     setLoading(true);
@@ -112,53 +118,102 @@ const TodaySchedule: React.FC = () => {
                 </Button>
               </div>
             ) : (
-              tasks.map((task) => (
-                <div key={task.id} className={`timeline-item ${getStatusColor(task)}`}>
-                  <div className="time-column">
-                    <span className="start-time">{format(parseISO(task.startTime), 'HH:mm')}</span>
-                    <span className="duration">
-                      {format(parseISO(task.endTime), 'HH:mm')}
-                    </span>
-                  </div>
-                  <div className="content-column">
-                    <div className="task-card" onClick={() => setSelectedTask(task)} style={{ cursor: 'pointer' }}>
-                      <div className="task-header">
-                        <h3>{task.name}</h3>
-                        {task.completed ? (
-                          <CheckCircle2 
-                            className="icon-completed" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenCompleteModal(task);
-                            }}
-                            style={{ cursor: 'pointer' }}
-                          />
-                        ) : (
-                          <Circle
-                            className="icon-pending"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenCompleteModal(task);
-                            }}
-                            style={{ cursor: 'pointer' }}
-                          />
-                        )}
+              tasks.map((task, index) => {
+                // Calculate if we should show the current time line before this task
+                const now = currentTime;
+                const taskStart = parseISO(task.startTime);
+                const taskEnd = parseISO(task.endTime);
+                
+                // Check if this is the first task and now is before it
+                const showLineBefore = index === 0 && now < taskStart;
+                
+                // Check if now is between previous task and this task
+                const prevTask = index > 0 ? tasks[index - 1] : null;
+                const prevTaskEnd = prevTask ? parseISO(prevTask.endTime) : null;
+                const showLineBetween = prevTaskEnd && now > prevTaskEnd && now < taskStart;
+
+                // Check if task is active (now is inside task duration)
+                const isActive = now >= taskStart && now <= taskEnd;
+
+                return (
+                  <React.Fragment key={task.id}>
+                    {/* Current Time Line (Before or Between) */}
+                    {(showLineBefore || showLineBetween) && (
+                      <div className="timeline-current-time-indicator">
+                        <div className="time-line-left">
+                          <span className="current-time-label">{format(now, 'HH:mm')}</span>
+                        </div>
+                        <div className="time-line-divider"></div>
                       </div>
-                      {task.description && <p className="task-desc">{task.description}</p>}
-                      <div className="task-meta">
-                        {task.location && (
-                          <span className="meta-item">
-                            <MapPin size={14} /> {task.location}
-                          </span>
-                        )}
-                        <span className="meta-item">
-                          <Clock size={14} /> {format(parseISO(task.startTime), 'HH:mm')} - {format(parseISO(task.endTime), 'HH:mm')}
+                    )}
+
+                    <div className={`timeline-item ${getStatusColor(task)}`}>
+                      <div className="time-column">
+                        <span className="start-time">{format(parseISO(task.startTime), 'HH:mm')}</span>
+                        <span className="duration">
+                          {format(parseISO(task.endTime), 'HH:mm')}
                         </span>
                       </div>
+                      <div className="content-column">
+                        {/* Active Task Indicator Overlay */}
+                        {isActive && (
+                          <div className="active-task-indicator-line" style={{
+                            top: `${Math.min(100, Math.max(0, (now.getTime() - taskStart.getTime()) / (taskEnd.getTime() - taskStart.getTime()) * 100))}%`
+                          }}>
+                            <div className="active-time-dot"></div>
+                          </div>
+                        )}
+                        
+                        <div className="task-card" onClick={() => setSelectedTask(task)} style={{ cursor: 'pointer' }}>
+                          <div className="task-header">
+                            <h3>{task.name}</h3>
+                            {task.completed ? (
+                              <CheckCircle2 
+                                className="icon-completed" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenCompleteModal(task);
+                                }}
+                                style={{ cursor: 'pointer' }}
+                              />
+                            ) : (
+                              <Circle
+                                className="icon-pending"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenCompleteModal(task);
+                                }}
+                                style={{ cursor: 'pointer' }}
+                              />
+                            )}
+                          </div>
+                          {task.description && <p className="task-desc">{task.description}</p>}
+                          <div className="task-meta">
+                            {task.location && (
+                              <span className="meta-item">
+                                <MapPin size={14} /> {task.location}
+                              </span>
+                            )}
+                            <span className="meta-item">
+                              <Clock size={14} /> {format(parseISO(task.startTime), 'HH:mm')} - {format(parseISO(task.endTime), 'HH:mm')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              ))
+                    
+                    {/* Show line after last task if now is later */}
+                    {index === tasks.length - 1 && now > taskEnd && (
+                      <div className="timeline-current-time-indicator">
+                        <div className="time-line-left">
+                          <span className="current-time-label">{format(now, 'HH:mm')}</span>
+                        </div>
+                        <div className="time-line-divider"></div>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })
             )}
           </div>
         </CardContent>

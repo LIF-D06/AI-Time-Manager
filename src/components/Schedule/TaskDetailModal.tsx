@@ -61,11 +61,20 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClose, task
     setIsSubmitting(true);
     setError('');
     try {
-      await updateTask(task.id, editedTask);
-      onTaskUpdated();
-      setIsEditing(false);
-      onClose();
+      const result = await updateTask(task.id, editedTask);
+      
+      if (result.conflictWarning) {
+        setConflictTasks(result.conflictWarning.conflicts);
+        setShowConflictModal(true);
+        onTaskUpdated();
+        setIsEditing(false);
+      } else {
+        onTaskUpdated();
+        setIsEditing(false);
+        onClose();
+      }
     } catch (err) {
+      console.error('Failed to update task', err);
       if (err instanceof ScheduleConflictError) {
         setConflictTasks(err.conflicts);
         setShowConflictModal(true);
@@ -288,12 +297,12 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClose, task
         title="日程冲突提醒"
         footer={
           <Button onClick={() => setShowConflictModal(false)}>
-            返回修改
+            我知道了
           </Button>
         }
       >
         <p style={{ marginBottom: '1rem', color: 'var(--color-text-medium)' }}>
-          修改后的时间与以下日程存在冲突：
+          日程已更新，但与以下日程存在时间冲突：
         </p>
         <div className="conflict-list" style={{ maxHeight: '200px', overflowY: 'auto' }}>
           {conflictTasks.map(t => (

@@ -7,6 +7,8 @@ import {
   updateEbridgePassword,
   getMicrosoftTodoStatus,
   getEbridgeStatus,
+  syncTimetable,
+  deleteTimetableTasks,
   type MicrosoftTodoStatus,
   type EbridgeStatus
 } from '../services/api';
@@ -20,7 +22,7 @@ import TodaySchedule from './Schedule/TodaySchedule';
 import SearchTasks from './Schedule/SearchTasks';
 import LogViewer from './Logs/LogViewer';
 import AIChat from './AIChat/AIChat';
-import { LayoutDashboard, Calendar, ListTodo, FileText, LogOut, MessageSquare, PanelLeftClose, PanelLeftOpen, Menu, X, Search } from 'lucide-react';
+import { LayoutDashboard, Calendar, ListTodo, FileText, LogOut, MessageSquare, PanelLeftClose, PanelLeftOpen, Menu, X, Search, RefreshCw, Copy, Check, Trash2, Download, Link } from 'lucide-react';
 import { ToggleButton } from './ui/ToggleButton';
 import '../styles/Dashboard.css';
 
@@ -31,7 +33,10 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
   const navigate = useNavigate();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(window.innerWidth < 1024);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    const isMobileView = window.innerWidth < 768;
+    return !isMobileView && window.innerWidth < 1024;
+  });
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [ebPassword, setEbPassword] = useState('');
@@ -47,6 +52,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
   const [statusError, setStatusError] = useState('');
   const [tokenCopied, setTokenCopied] = useState(false);
   const [showUnboundModal, setShowUnboundModal] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [showEbridgeConnectModal, setShowEbridgeConnectModal] = useState(false);
+  const [resultModalData, setResultModalData] = useState({ title: '', message: '', isError: false });
 
   useEffect(() => {
     const handleResize = () => {
@@ -125,6 +135,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
       // 更新密码后刷新Ebridge状态
       const newStatus = await getEbridgeStatus();
       setEbridgeStatus(newStatus);
+      setShowEbridgeConnectModal(false);
     } catch (err: any) {
       setError(err.message || '密码更新失败');
     } finally {
@@ -168,6 +179,56 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
     }
   };
 
+  const handleSyncTimetable = async () => {
+    setSyncLoading(true);
+    try {
+      const result = await syncTimetable();
+      setResultModalData({
+        title: '同步成功',
+        message: `课表同步成功！新增: ${result.added}, 错误: ${result.errors}`,
+        isError: false
+      });
+      setShowResultModal(true);
+    } catch (err: any) {
+      setResultModalData({
+        title: '同步失败',
+        message: err.message || '课表同步失败',
+        isError: true
+      });
+      setShowResultModal(true);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  const handleDeleteTimetable = () => {
+    setShowDeleteConfirmModal(true);
+  };
+
+  const executeDeleteTimetable = async () => {
+    setSyncLoading(true);
+    setShowDeleteConfirmModal(false);
+    
+    try {
+      const result = await deleteTimetableTasks();
+      setResultModalData({
+        title: '操作成功',
+        message: result.message,
+        isError: false
+      });
+      setShowResultModal(true);
+    } catch (err: any) {
+      setResultModalData({
+        title: '操作失败',
+        message: err.message || '删除课程表日程失败',
+        isError: true
+      });
+      setShowResultModal(true);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
   const renderConnectionStatus = () => {
     if (statusLoading) {
       return <div className="status-loading">正在检查连接状态...</div>;
@@ -180,42 +241,119 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
     return (
       <Card className="connection-status-section">
         <CardHeader>
-          <CardTitle>连接状态</CardTitle>
+          <CardTitle>连接状态与控制</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="status-container">
-            <div className={`status-item ${msTodoStatus?.connected ? 'connected' : 'disconnected'}`}>
-              <span className="status-label">Microsoft To Do:</span>
-              <span className="status-value">
-                {msTodoStatus?.connected ? '已连接' : '未连接'}
-              </span>
-              {msTodoStatus?.connected && <Badge variant="success">✓</Badge>}
-            </div>
-            
-            <div className={`status-item ${ebridgeStatus?.connected ? 'connected' : 'disconnected'}`}>
-              <span className="status-label">Ebridge:</span>
-              <span className="status-value">
-                {ebridgeStatus?.connected ? '已连接' : '未连接'}
-              </span>
-              {ebridgeStatus?.connected && <Badge variant="success">✓</Badge>}
+          <div className="control-section" style={{ marginTop: 0, borderTop: 'none', paddingTop: 0 }}>
+            <h4 className="section-title">服务连接</h4>
+            <div className="action-grid">
+              {/* Microsoft To Do Card */}
+              <div className="action-card">
+                <div className="action-icon-wrapper microsoft">
+                  <ListTodo size={20} />
+                </div>
+                <div className="action-info">
+                  <span className="action-title">Microsoft To Do</span>
+                  <span className="action-desc">
+                    {msTodoStatus?.connected ? '已连接到 Microsoft' : '未连接，点击连接'}
+                  </span>
+                </div>
+                {msTodoStatus?.connected ? (
+                  <Badge variant="success">已连接</Badge>
+                ) : (
+                  <Button 
+                    onClick={handleConnectMicrosoft} 
+                    variant="primary"
+                    size="sm"
+                    className="action-btn"
+                  >
+                    连接
+                  </Button>
+                )}
+              </div>
+
+              {/* Ebridge Card */}
+              <div className="action-card">
+                <div className="action-icon-wrapper ebridge">
+                  <Link size={20} />
+                </div>
+                <div className="action-info">
+                  <span className="action-title">Ebridge 教务系统</span>
+                  <span className="action-desc">
+                    {ebridgeStatus?.connected ? '已连接到教务系统' : '未连接，点击连接'}
+                  </span>
+                </div>
+                {ebridgeStatus?.connected ? (
+                  <Badge variant="success">已连接</Badge>
+                ) : (
+                  <Button 
+                    onClick={() => setShowEbridgeConnectModal(true)} 
+                    variant="primary"
+                    size="sm"
+                    className="action-btn"
+                  >
+                    连接
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px' }}>
-            <Button onClick={handleRefreshStatus}>
-              刷新状态
+          
+          {ebridgeStatus?.connected && (
+            <div className="control-section">
+              <h4 className="section-title">课表管理</h4>
+              <div className="action-grid">
+                <div className="action-card">
+                  <div className="action-icon-wrapper sync">
+                    <Download size={20} />
+                  </div>
+                  <div className="action-info">
+                    <span className="action-title">同步课表</span>
+                    <span className="action-desc">从 Ebridge 获取最新课程</span>
+                  </div>
+                  <Button 
+                    onClick={handleSyncTimetable} 
+                    disabled={syncLoading}
+                    variant="secondary"
+                    size="sm"
+                    className="action-btn"
+                  >
+                    {syncLoading ? '同步中...' : '立即同步'}
+                  </Button>
+                </div>
+
+                <div className="action-card danger">
+                  <div className="action-icon-wrapper delete">
+                    <Trash2 size={20} />
+                  </div>
+                  <div className="action-info">
+                    <span className="action-title">清空课表</span>
+                    <span className="action-desc">删除所有导入的课程日程</span>
+                  </div>
+                  <Button 
+                    onClick={handleDeleteTimetable} 
+                    disabled={syncLoading}
+                    variant="danger"
+                    size="sm"
+                    className="action-btn"
+                  >
+                    删除全部
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="global-actions">
+             <Button variant="outline" onClick={handleRefreshStatus} size="sm">
+              <RefreshCw size={14} style={{marginRight: '6px'}}/> 刷新状态
+            </Button>
+             <Button variant="outline" onClick={handleCopyToken} size="sm">
+              {tokenCopied ? <Check size={14} style={{marginRight: '6px'}}/> : <Copy size={14} style={{marginRight: '6px'}}/>}
+              {tokenCopied ? '已复制' : '复制 MCP Token'}
             </Button>
           </div>
           
-          <div className="mcp-token-section">
-            <h4>MCP 鉴权 Token</h4>
-            <p>用于配置 MCP 客户端访问您的数据</p>
-            <Button 
-              variant={tokenCopied ? 'primary' : 'secondary'}
-              onClick={handleCopyToken}
-            >
-              {tokenCopied ? '已复制到剪贴板!' : '复制 Access Token'}
-            </Button>
-          </div>
         </CardContent>
       </Card>
     );
@@ -255,73 +393,51 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
 
         {renderConnectionStatus()}
 
-        {/* Microsoft连接按钮 - 只有在未连接时显示 */}
-        {!msTodoStatus?.connected && (
-          <section className="connection-action">
-            <Card>
-              <CardHeader>
-                <CardTitle>连接 Microsoft 账户</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p>连接您的 Microsoft 账户以同步任务到 To Do 列表。</p>
-                <Button 
-                  variant="primary"
-                  size="lg"
-                  onClick={handleConnectMicrosoft}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '8px' }}>
-                    <path d="M19.19 10.47l-1.9-1.9c-3.68-3.67-9.68-3.67-13.36 0-1.42 1.42-2.14 3.32-2.14 5.23 0 1.9.72 3.8 2.14 5.23 3.68 3.67 9.68 3.67 13.36 0l1.9-1.9c.75-.75.75-1.98 0-2.73s-1.98-.75-2.73 0l-1.9 1.9c-2.1 2.1-5.53 2.1-7.63 0-1.26-1.26-1.26-3.31 0-4.57 2.1-2.1 5.53-2.1 7.63 0l1.9 1.9c.75.75 1.98.75 2.73 0 .75-.75.75-1.98 0-2.73zM12 15.6v-11.2l5.6 5.6z"/>
-                  </svg>
-                  连接 Microsoft 账户
-                </Button>
-              </CardContent>
-            </Card>
-          </section>
-        )}
-
-        {/* Ebridge密码更新表单 - 只有在未连接时显示 */}
-        {!ebridgeStatus?.connected && (
-          <section className="connection-action">
-            <Card>
-              <CardHeader>
-                <CardTitle>更新 Ebridge 密码</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {message && <div className="success-message">{message}</div>}
-                {error && <div className="error-message">{error}</div>}
-                <form onSubmit={handleUpdatePassword}>
-                  <Input
-                    label="XJTLU 账号"
-                    type="text"
-                    id="XJTLUaccount"
-                    value={XJTLUaccount}
-                    onChange={(e) => setXJTLUaccount(e.target.value)}
-                    required
-                  />
-                  <Input
-                    label="Ebridge 密码"
-                    type="password"
-                    id="ebPassword"
-                    value={ebPassword}
-                    onChange={(e) => setEbPassword(e.target.value)}
-                    required
-                  />
-                  <Input
-                    label="平台登录密码"
-                    type="password"
-                    id="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                  <Button type="submit" disabled={loading} style={{ width: '100%' }}>
-                    {loading ? '更新中...' : '更新密码'}
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-          </section>
-        )}
+        <Modal
+          isOpen={showEbridgeConnectModal}
+          onClose={() => setShowEbridgeConnectModal(false)}
+          title="连接 Ebridge 教务系统"
+        >
+          {message && <div className="success-message">{message}</div>}
+          {error && <div className="error-message">{error}</div>}
+          <form onSubmit={handleUpdatePassword}>
+            <Input
+              label="XJTLU 账号"
+              type="text"
+              id="XJTLUaccount"
+              value={XJTLUaccount}
+              onChange={(e) => setXJTLUaccount(e.target.value)}
+              required
+              placeholder="例如: san.zhang23"
+            />
+            <Input
+              label="Ebridge 密码"
+              type="password"
+              id="ebPassword"
+              value={ebPassword}
+              onChange={(e) => setEbPassword(e.target.value)}
+              required
+              placeholder="请输入您的 Ebridge 登录密码"
+            />
+            <Input
+              label="平台登录密码"
+              type="password"
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              placeholder="请输入本平台的登录密码以验证身份"
+            />
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <Button type="button" variant="secondary" onClick={() => setShowEbridgeConnectModal(false)}>
+                取消
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading ? '连接中...' : '确认连接'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
       </div>
     );
   };
@@ -428,6 +544,39 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
             {!ebridgeStatus?.connected && <li>Ebridge 未连接</li>}
           </ul>
           <p>为了确保功能正常使用，请尽快完成绑定。</p>
+        </Modal>
+
+        <Modal
+          isOpen={showDeleteConfirmModal}
+          onClose={() => setShowDeleteConfirmModal(false)}
+          title="确认删除"
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <Button variant="secondary" onClick={() => setShowDeleteConfirmModal(false)}>
+                取消
+              </Button>
+              <Button variant="danger" onClick={executeDeleteTimetable}>
+                确认删除
+              </Button>
+            </div>
+          }
+        >
+          <p>确定要删除所有课程表导入的日程吗？此操作无法撤销。</p>
+        </Modal>
+
+        <Modal
+          isOpen={showResultModal}
+          onClose={() => setShowResultModal(false)}
+          title={resultModalData.title}
+          footer={
+            <Button onClick={() => setShowResultModal(false)}>
+              确定
+            </Button>
+          }
+        >
+          <p className={resultModalData.isError ? "error-message" : "success-message"} style={{ margin: 0 }}>
+            {resultModalData.message}
+          </p>
         </Modal>
       </main>
     </div>

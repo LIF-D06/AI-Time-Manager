@@ -32,3 +32,9 @@ deploy/deployment.zip
 deploy/deploy-to-azure-fixed.sh
 deploy/deploy-to-azure-fixed.ps1
 src/IFLOW.md
+
+# Docker scripts
+docker-build.sh
+docker-build.ps1
+docker-run.sh
+docker-run.ps1

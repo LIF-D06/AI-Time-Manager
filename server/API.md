@@ -266,16 +266,15 @@ RecurrenceSummary（创建/批量创建响应中）:
 ```
 {
   "task": { ...根任务... },
-  "recurrenceSummary": { createdInstances: 4, conflictInstances: 0, errorInstances: 0, requestedRule: {...} }
+  "recurrenceSummary": { createdInstances: 4, conflictInstances: 0, errorInstances: 0, requestedRule: {...} },
+  "conflictWarning": { // 可选，仅当存在冲突时返回
+     "message": "Task created with time conflicts",
+     "conflicts": [ { id, name, startTime, endTime }, ... ],
+     "instanceConflicts": [ ... ]
+  }
 }
 ```
-冲突：409（ScheduleConflictError）
-```
-{
-  "error": "Task time conflicts",
-  "conflicts": [ { id, name, startTime, endTime }, ... ]
-}
-```
+注：不再返回 409 错误，而是允许创建并返回警告。
 
 ### POST /api/tasks/conflicts
 预检查冲突不创建：
@@ -301,8 +300,7 @@ RecurrenceSummary（创建/批量创建响应中）:
 ```
 {
   "results": [
-    { input: {...}, status: "created", task: {...}, recurrenceSummary? },
-    { input: {...}, status: "conflict", conflictList: [ ... ] },
+    { input: {...}, status: "created", task: {...}, recurrenceSummary?, conflictWarning? },
     { input: {...}, status: "error", errorMessage: "..." }
   ],
   "summary": { total, created, conflicts, errors }
@@ -311,6 +309,13 @@ RecurrenceSummary（创建/批量创建响应中）:
 
 ### PUT /api/tasks/:id
 更新任务（含冲突检测）。若设置 `completed: true` 且先前为 false，将广播 `completed` 事件。
+成功响应：200
+```
+{
+  "task": { ... },
+  "conflictWarning": { ... } // 可选，若有冲突
+}
+```
 
 ### PATCH /api/tasks/:id
 部分更新任务。与 PUT 类似，但只更新提供的字段。
@@ -323,11 +328,35 @@ RecurrenceSummary（创建/批量创建响应中）:
 ```
 成功响应：200
 ```
-{ ...更新后的完整任务对象... }
+{
+  ...更新后的完整任务对象...,
+  "conflictWarning": { ... } // 可选，若有冲突
+}
 ```
 
 ### DELETE /api/tasks/:id
 删除任务并广播 `deleted`。
+
+### POST /api/sync/timetable
+手动触发课表同步（从 Ebridge 抓取）。
+响应：200
+```
+{
+  "message": "Timetable sync completed",
+  "added": 5,
+  "errors": 0
+}
+```
+
+### DELETE /api/sync/timetable
+一键删除所有由课程表导入的日程（ID 以 `timetable_` 开头）。
+响应：200
+```
+{
+  "message": "Successfully deleted 10 timetable tasks",
+  "count": 10
+}
+```
 
 ### GET /api/tasks
 查询与过滤：支持 `q`（名称/描述模糊），`completed`（true|false），时间窗口与分页排序：

@@ -1,7 +1,7 @@
 :root {
   /* Primary Colors */
   --color-primary: #467ee5;
-  --color-primary-light: #eef2ff;
+  --color-primary-light: #6da1eb;
   --color-primary-active-border: #3182ce;
 
   /* Text Colors */
@@ -27,7 +27,7 @@
 
   /* Gradient Colors */
   --color-gradient-start: #667eea;
-  --color-gradient-end: #764ba2;
+  --color-gradient-end: #4b61a2;
 
   /* Neutral Colors */
   --color-neutral-100: #f9f9f9;
@@ -65,4 +65,11 @@
 
   /* Common Colors */
   --color-white: #ffffff;
+
+  /* Button Active Colors */
+  --color-primary-active: #376bc4;
+  --color-secondary-active: #cbd5e0;
+  --color-outline-active: #e2e8f0;
+  --color-ghost-active: #e2e8f0;
+  --color-danger-active: #b91c1c;
 }

@@ -476,18 +476,124 @@
   overflow-y: auto;
 }
 
-/* Adjustments for mobile view */
-@media (max-width: 768px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .status-container {
-    flex-direction: column;
-    gap: 1rem;
-  }
-  
-  .status-item {
-    width: 100%;
-  }
+/* New Dashboard Control Styles */
+.control-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #4a5568;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.action-card {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.action-card:hover {
+  border-color: #cbd5e0;
+  background-color: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.action-card.danger {
+  background-color: #fff5f5;
+  border-color: #fed7d7;
+}
+
+.action-card.danger:hover {
+  border-color: #fc8181;
+  background-color: #fff;
+}
+
+.action-icon-wrapper {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.action-icon-wrapper.sync {
+  background-color: #ebf8ff;
+  color: #3182ce;
+}
+
+.action-icon-wrapper.delete {
+  background-color: #fed7d7;
+  color: #e53e3e;
+}
+
+.action-icon-wrapper.microsoft {
+  background-color: #e6fffa;
+  color: #319795;
+}
+
+.action-icon-wrapper.ebridge {
+  background-color: #faf5ff;
+  color: #805ad5;
+}
+
+.action-info {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  margin-right: 12px;
+}
+
+.action-title {
+  font-weight: 600;
+  color: #2d3748;
+  font-size: 0.95rem;
+}
+
+.action-desc {
+  font-size: 0.8rem;
+  color: #718096;
+  margin-top: 2px;
+}
+
+.action-btn {
+  white-space: nowrap;
+}
+
+.global-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* Update status item styles for new layout */
+.status-item {
+  justify-content: space-between;
+  padding: 16px;
+}
+
+.status-badge {
+  margin-left: auto;
 }

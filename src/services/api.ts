@@ -250,7 +250,19 @@ export class ScheduleConflictError extends Error {
   }
 }
 
-export const createTask = async (taskData: Omit<Task, 'id' | 'completed'>) => {
+export interface ConflictWarning {
+  message: string;
+  conflicts: Task[];
+  instanceConflicts?: any[];
+}
+
+export interface CreateTaskResponse {
+  task: Task;
+  recurrenceSummary?: any;
+  conflictWarning?: ConflictWarning;
+}
+
+export const createTask = async (taskData: Omit<Task, 'id' | 'completed'>): Promise<CreateTaskResponse> => {
   const token = getToken();
   if (!token) throw new Error('用户未登录');
 
@@ -274,7 +286,7 @@ export const createTask = async (taskData: Omit<Task, 'id' | 'completed'>) => {
   return await response.json();
 };
 
-export const updateTask = async (taskId: string, taskData: Partial<Omit<Task, 'id'>>): Promise<Task> => {
+export const updateTask = async (taskId: string, taskData: Partial<Omit<Task, 'id'>>): Promise<Task & { conflictWarning?: ConflictWarning }> => {
   const token = getToken();
   if (!token) throw new Error('用户未登录');
 
@@ -381,4 +393,50 @@ export const deleteTask = async (taskId: string): Promise<void> => {
     const errorData = await response.json();
     throw new Error(errorData.error || '删除任务失败');
   }
+};
+
+export interface SyncTimetableResponse {
+  message: string;
+  added: number;
+  errors: number;
+}
+
+export const syncTimetable = async (): Promise<SyncTimetableResponse> => {
+  const response = await customFetch(`${API_BASE_URL}/api/sync/timetable`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({}),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || '同步课表失败');
+  }
+
+  return response.json();
+};
+
+export interface DeleteTimetableResponse {
+  message: string;
+  count: number;
+}
+
+export const deleteTimetableTasks = async (): Promise<DeleteTimetableResponse> => {
+  const response = await customFetch(`${API_BASE_URL}/api/sync/timetable`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getToken()}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || '删除课表日程失败');
+  }
+
+  return response.json();
 };

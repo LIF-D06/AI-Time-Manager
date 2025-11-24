@@ -18,6 +18,11 @@ import { EmailMessageSchema, SearchFilter } from 'ews-javascript-api';
 import { startIntervals } from './intervals';
 import { initializeMcpRoutes } from './Services/mcp';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // 全局错误处理 - 防止服务器崩溃
 process.on('unhandledRejection', (reason, promise) => {
@@ -424,6 +429,25 @@ app.get('/redirect', async (req, res) => {
 });
 
 // API路由已移至专用模块
+
+// Serve static files
+app.use(express.static(path.join(__dirname, '../../dist')));
+
+app.get('*', (req, res) => {
+    // Don't intercept API requests
+    if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'Not Found' });
+    }
+    const indexPath = path.join(__dirname, '../../dist/index.html');
+    // Check if file exists to avoid crashing if dist is missing
+    res.sendFile(indexPath, (err) => {
+        if (err) {
+            if (!res.headersSent) {
+                res.status(404).send('Frontend not built or not found.');
+            }
+        }
+    });
+});
 
 // 初始化数据库并启动服务器
 async function startServer() {

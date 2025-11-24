@@ -9,6 +9,7 @@ import { generateRecurrenceInstances, buildRecurrenceSummary } from '../Services
 import { broadcastTaskChange } from '../Services/websocket.js';
 import { logUserEvent } from '../Services/userLog.js';
 import { LLMApi } from '../Services/LLMApi.js';
+import { syncUserTimetable } from '../Services/timetable.js';
 
 // 身份验证中间件引用
 export interface AuthMiddleware {
@@ -104,6 +105,43 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
     }
   });
 
+  // 手动触发课表同步
+  router.post('/sync/timetable', authenticateToken, async (req: any, res: any) => {
+    try {
+      const user = req.user as User;
+      if (!user.ebridgeBinded || !user.timetableUrl) {
+        return res.status(400).json({ error: 'User not bound to Ebridge or missing timetable URL' });
+      }
+      
+      const result = await syncUserTimetable(user, true);
+      return res.status(200).json({ 
+        message: 'Timetable sync completed', 
+        added: result.added, 
+        errors: result.errors 
+      });
+    } catch (error: any) {
+      logger.error('Manual timetable sync failed:', error);
+      return res.status(500).json({ error: 'Failed to sync timetable', details: error.message });
+    }
+  });
+
+  // 删除所有课程表导入的日程
+  router.delete('/sync/timetable', authenticateToken, async (req: any, res: any) => {
+    try {
+      const user = req.user as User;
+      const count = await dbService.deleteTasksByPattern(user.id, 'timetable_%');
+      
+      // 刷新用户缓存
+      const deletedIds = user.tasks.filter(t => t.id.startsWith('timetable_')).map(t => t.id);
+      await dbService.refreshUserTasksIncremental(user, { deletedIds });
+      
+      return res.status(200).json({ message: `Successfully deleted ${count} timetable tasks`, count });
+    } catch (error) {
+      logger.error('Failed to delete timetable tasks:', error);
+      return res.status(500).json({ error: 'Failed to delete timetable tasks' });
+    }
+  });
+
   // 获取用户日志（分页、可按时间与类型过滤）
   router.get('/logs', authenticateToken, async (req: any, res: any) => {
     try {
@@ -141,38 +179,48 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       };
       const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
       if (recurrenceRule) task.recurrenceRule = JSON.stringify(recurrenceRule);
+      
+      // 冲突检测
+      const conflicts = findConflictingTasks(user.tasks || [], task, { boundaryConflict: effectiveBoundary });
+      
       try {
-        await dbService.addTask(user.id, task, effectiveBoundary);
+        await dbService.addTask(user.id, task, effectiveBoundary, true);
       } catch (e: any) {
-        if (e instanceof ScheduleConflictError) {
-          return res.status(409).json({
-            error: 'Task time conflicts',
-            conflicts: e.conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
-          });
-        }
         throw e;
       }
       broadcastTaskChange('created', task, user.id);
-      await logUserEvent(user.id, 'taskCreated', `Created task ${task.name}`, { id: task.id, startTime: task.startTime, endTime: task.endTime });
+      if (conflicts.length > 0) {
+        await logUserEvent(user.id, 'taskConflict', `Created task with conflict ${task.name}`, { id: task.id, conflicts: conflicts.map(c => c.id) });
+      } else {
+        await logUserEvent(user.id, 'taskCreated', `Created task ${task.name}`, { id: task.id, startTime: task.startTime, endTime: task.endTime });
+      }
+
       let createdChildren = 0, conflictChildren = 0, errorChildren = 0;
       const createdIds: string[] = [task.id];
+      const instanceConflicts: any[] = [];
+
       if (recurrenceRule) {
         const generated = generateRecurrenceInstances(task, recurrenceRule);
         for (const inst of generated) {
             try {
-            await dbService.addTask(user.id, inst, effectiveBoundary);
+            const instConf = findConflictingTasks(user.tasks || [], inst, { boundaryConflict: effectiveBoundary });
+            if (instConf.length > 0) {
+                instanceConflicts.push({
+                    instance: { id: inst.id, startTime: inst.startTime, endTime: inst.endTime },
+                    conflicts: instConf.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
+                });
+                await logUserEvent(user.id, 'taskConflict', `Created recurrence instance with conflict ${inst.name}`, { parentId: task.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
+            } else {
+                await logUserEvent(user.id, 'taskCreated', `Created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
+            }
+
+            await dbService.addTask(user.id, inst, effectiveBoundary, true);
             createdChildren++;
             createdIds.push(inst.id);
             broadcastTaskChange('created', inst, user.id);
-            await logUserEvent(user.id, 'taskCreated', `Created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
           } catch (e: any) {
-            if (e instanceof ScheduleConflictError) {
-              conflictChildren++;
-              await logUserEvent(user.id, 'taskConflict', `Conflict creating recurrence instance for ${task.name}`, { parentId: task.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
-            } else {
               errorChildren++;
               await logUserEvent(user.id, 'taskError', `Error creating recurrence instance for ${task.name}`, { parentId: task.id, error: e?.message });
-            }
           }
         }
       }
@@ -180,7 +228,12 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       await dbService.refreshUserTasksIncremental(user, { addedIds: createdIds });
       return res.status(201).json({
         task,
-        recurrenceSummary: buildRecurrenceSummary(recurrenceRule, createdChildren, conflictChildren, errorChildren)
+        recurrenceSummary: buildRecurrenceSummary(recurrenceRule, createdChildren, 0, errorChildren),
+        conflictWarning: (conflicts.length > 0 || instanceConflicts.length > 0) ? {
+            message: 'Task created with time conflicts',
+            conflicts: conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })),
+            instanceConflicts
+        } : undefined
       });
     } catch (error) {
       logger.error('Create task failed:', error);
@@ -248,57 +301,81 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
           importance: importance || 'normal',
         };
         if (recurrenceRule) task.recurrenceRule = JSON.stringify(recurrenceRule);
+        
+        const conflicts = findConflictingTasks(user.tasks || [], task, { boundaryConflict: effectiveBoundary });
+
           try {
-          await dbService.addTask(user.id, task, effectiveBoundary);
+          await dbService.addTask(user.id, task, effectiveBoundary, true);
           broadcastTaskChange('created', task, user.id);
-          await logUserEvent(user.id, 'taskCreated', `Batch created task ${task.name}`, { id: task.id, startTime: task.startTime, endTime: task.endTime });
+          
+          if (conflicts.length > 0) {
+             await logUserEvent(user.id, 'taskConflict', `Batch created task with conflict ${task.name}`, { id: task.id, startTime: task.startTime, endTime: task.endTime });
+          } else {
+             await logUserEvent(user.id, 'taskCreated', `Batch created task ${task.name}`, { id: task.id, startTime: task.startTime, endTime: task.endTime });
+          }
+
           let createdChildren = 0, conflictChildren = 0, errorChildren = 0;
           const createdIds: string[] = [task.id];
+          const instanceConflicts: any[] = [];
+
           if (recurrenceRule) {
             const generated = generateRecurrenceInstances(task, recurrenceRule);
             for (const inst of generated) {
               try {
-                await dbService.addTask(user.id, inst, effectiveBoundary);
+                const instConf = findConflictingTasks(user.tasks || [], inst, { boundaryConflict: effectiveBoundary });
+                if (instConf.length > 0) {
+                    instanceConflicts.push({
+                        instance: { id: inst.id, startTime: inst.startTime, endTime: inst.endTime },
+                        conflicts: instConf.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
+                    });
+                    await logUserEvent(user.id, 'taskConflict', `Batch created recurrence instance with conflict ${inst.name}`, { parentId: task.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
+                } else {
+                    await logUserEvent(user.id, 'taskCreated', `Batch created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
+                }
+
+                await dbService.addTask(user.id, inst, effectiveBoundary, true);
                 createdChildren++;
                 createdIds.push(inst.id);
                 broadcastTaskChange('created', inst, user.id);
-                await logUserEvent(user.id, 'taskCreated', `Batch created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
               } catch (e: any) {
-                if (e instanceof ScheduleConflictError) {
-                  conflictChildren++;
-                  await logUserEvent(user.id, 'taskConflict', `Conflict creating batch instance for ${task.name}`, { parentId: task.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
-                } else {
                   errorChildren++;
                   await logUserEvent(user.id, 'taskError', `Error creating batch instance for ${task.name}`, { parentId: task.id, error: e?.message });
-                }
               }
             }
-            results.push({ input, status: 'created', task, recurrenceSummary: buildRecurrenceSummary(recurrenceRule, createdChildren, conflictChildren, errorChildren) });
+            results.push({ 
+                input, 
+                status: 'created', 
+                task, 
+                recurrenceSummary: buildRecurrenceSummary(recurrenceRule, createdChildren, 0, errorChildren),
+                conflictWarning: (conflicts.length > 0 || instanceConflicts.length > 0) ? {
+                    message: 'Task created with time conflicts',
+                    conflicts: conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })),
+                    instanceConflicts
+                } : undefined
+            });
           } else {
-            results.push({ input, status: 'created', task });
+            results.push({ 
+                input, 
+                status: 'created', 
+                task,
+                conflictWarning: conflicts.length > 0 ? {
+                    message: 'Task created with time conflicts',
+                    conflicts: conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
+                } : undefined
+            });
           }
           // 增量刷新缓存：合并新建 id
           await dbService.refreshUserTasksIncremental(user, { addedIds: createdIds });
           created++;
         } catch (e: any) {
-          if (e instanceof ScheduleConflictError) {
-            conflictsCount++;
-            results.push({
-              input,
-              status: 'conflict',
-              conflictList: e.conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
-            });
-            await logUserEvent(user.id, 'taskConflict', `Conflict creating task ${name}`, { startTime, endTime, conflicts: e.conflicts });
-          } else {
             errors++;
             results.push({ input, status: 'error', errorMessage: e?.message || 'unknown error' });
             await logUserEvent(user.id, 'taskError', `Error creating task ${name}`, { startTime, endTime, error: e?.message });
-          }
         }
       }
       return res.status(200).json({
         results,
-        summary: { total: tasks.length, created, conflicts: conflictsCount, errors }
+        summary: { total: tasks.length, created, conflicts: 0, errors } // conflicts count is 0 because we created them
       });
     } catch (error) {
       logger.error('Batch task creation failed:', error);
@@ -346,26 +423,33 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       };
       try {
         const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
-        await dbService.updateTask(updated, effectiveBoundary);
+        
+        // 冲突检测
+        const conflicts = findConflictingTasks(user.tasks.filter(t => t.id !== updated.id), updated, { boundaryConflict: effectiveBoundary });
+        
+        await dbService.updateTask(updated, effectiveBoundary, true);
         broadcastTaskChange('updated', updated, user.id);
-        await logUserEvent(user.id, 'taskUpdated', `Updated task ${updated.name}`, { id: updated.id, changes: { name, description, startTime, endTime, dueDate, location, completed, importance } });
+        
+        if (conflicts.length > 0) {
+            await logUserEvent(user.id, 'taskUpdated', `Updated task with conflict ${updated.name}`, { id: updated.id, changes: { name, description, startTime, endTime, dueDate, location, completed, importance }, conflicts: conflicts.map(c => c.id) });
+        } else {
+            await logUserEvent(user.id, 'taskUpdated', `Updated task ${updated.name}`, { id: updated.id, changes: { name, description, startTime, endTime, dueDate, location, completed, importance } });
+        }
+
         if (completed === true && !existing.completed) {
           broadcastTaskChange('completed', updated, user.id);
           await logUserEvent(user.id, 'taskCompleted', `Completed task ${updated.name}`, { id: updated.id });
         }
         // 增量刷新缓存：仅合并被更新的任务
         await dbService.refreshUserTasksIncremental(user, { updatedIds: [updated.id] });
-        return res.status(200).json({ task: updated });
+        return res.status(200).json({ 
+            task: updated,
+            conflictWarning: conflicts.length > 0 ? {
+                message: 'Task updated with time conflicts',
+                conflicts: conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
+            } : undefined
+        });
       } catch (e: any) {
-        if (e instanceof ScheduleConflictError) {
-          return res.status(409).json({
-            error: 'conflict',
-            message: e.message,
-            candidate: { id: updated.id, name: updated.name, startTime: updated.startTime, endTime: updated.endTime },
-            conflicts: e.conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
-          });
-          // log in conflict branch too (but response already returned)
-        }
         logger.error('Failed to update task:', e);
         return res.status(500).json({ error: 'Failed to update task' });
       }
@@ -402,10 +486,23 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
 
         const wasCompleted = existingTask.completed;
 
-        const updatedTask = await dbService.patchTask(user.id, taskId, updates, boundaryConflict);
+        const updatedTask = await dbService.patchTask(user.id, taskId, updates, boundaryConflict, true);
+
+        // 冲突检测 (需要构建完整的对象)
+        const fullUpdatedTask = { ...existingTask, ...updates, id: taskId };
+        const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
+        let conflicts: any[] = [];
+        if (updates.startTime || updates.endTime) {
+             conflicts = findConflictingTasks(user.tasks.filter(t => t.id !== taskId), fullUpdatedTask, { boundaryConflict: effectiveBoundary });
+        }
 
         broadcastTaskChange('updated', updatedTask, user.id);
-        await logUserEvent(user.id, 'taskUpdated', `Patched task ${updatedTask.name}`, { id: updatedTask.id, changes: updates });
+        
+        if (conflicts.length > 0) {
+            await logUserEvent(user.id, 'taskUpdated', `Patched task with conflict ${updatedTask.name}`, { id: updatedTask.id, changes: updates, conflicts: conflicts.map(c => c.id) });
+        } else {
+            await logUserEvent(user.id, 'taskUpdated', `Patched task ${updatedTask.name}`, { id: updatedTask.id, changes: updates });
+        }
 
         if (updates.completed === true && !wasCompleted) {
             broadcastTaskChange('completed', updatedTask, user.id);
@@ -414,14 +511,15 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         
         await dbService.refreshUserTasksIncremental(user, { updatedIds: [taskId] });
 
-        return res.status(200).json(updatedTask);
-    } catch (error: any) {
-        if (error instanceof ScheduleConflictError) {
-            return res.status(409).json({
-                error: 'Task time conflicts',
-                conflicts: error.conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
-            });
+        const response: any = { ...updatedTask };
+        if (conflicts.length > 0) {
+            response.conflictWarning = {
+                message: 'Task patched with time conflicts',
+                conflicts: conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime }))
+            };
         }
+        return res.status(200).json(response);
+    } catch (error: any) {
         logger.error('Patch task failed:', error);
         return res.status(500).json({ error: 'Failed to patch task' });
     }
