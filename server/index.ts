@@ -9,7 +9,7 @@ import {dbService} from './Services/dbService';
 import moment from 'moment';
 import { initializeApiRoutes } from './routes/apiRoutes';
 import { Options, PythonShell } from 'python-shell';
-import { ExchangeConfig, TimetableActivity } from './Services/types';
+import { ExchangeConfig, TimetableActivity, ScheduleType } from './Services/types';
 import { ScheduleConflictError } from './Services/scheduleConflict';
 import { initWebSocket, broadcastTaskChange, broadcastUserLog } from './Services/websocket';
 import { logUserEvent } from './Services/userLog';
@@ -71,6 +71,7 @@ export interface Task {
     parentTaskId?: string; // 若为重复任务生成的子实例，则指向源任务
     importance?: 'high' | 'normal' | 'low';
     isReminderOn?: boolean;
+    scheduleType?: ScheduleType;
 }
 
 export interface User {
@@ -87,6 +88,7 @@ export interface User {
     MStoken?: string; // Microsoft access token (optional)
     MSbinded: boolean; // 是否绑定了 Microsoft 账号
     ebridgeBinded: boolean; // 是否绑定了 ebridge 账号
+    weekOffset?: number; // 用户自定义周数偏移量，叠加在全局偏移之上
     tasks: Task[]; // 用户绑定的任务列表
     emsClient?: ExchangeClient; // 用于操作 Exchange 的客户端
     conflictBoundaryInclusive?: boolean; // 端点相接是否算冲突（true=算）
@@ -277,6 +279,7 @@ app.post('/register', async (req, res) => {
                 endTime: new Date().toISOString(),
                 completed: false,
                 pushedToMSTodo: false,
+                scheduleType: 'single',
             }]
         };
 

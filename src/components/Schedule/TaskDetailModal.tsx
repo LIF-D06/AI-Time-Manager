@@ -108,10 +108,25 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClose, task
     setShowDeleteModal(true);
   };
 
-  const handleConfirmDelete = async () => {
+  const handleDeleteOnlyInstance = async () => {
     setIsSubmitting(true);
     try {
-      await deleteTask(task.id);
+      await deleteTask(task.id, false);
+      onTaskUpdated();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败');
+    } finally {
+      setIsSubmitting(false);
+      setShowDeleteModal(false);
+    }
+  };
+
+  const handleDeleteEntireParent = async () => {
+    setIsSubmitting(true);
+    try {
+      const parentId = task.parentTaskId || task.id; // if viewing instance use parentId, else use current id
+      await deleteTask(parentId, true);
       onTaskUpdated();
       onClose();
     } catch (err) {
@@ -278,17 +293,35 @@ const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClose, task
         onClose={() => setShowDeleteModal(false)}
         title="确认删除"
         footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-            <Button variant="secondary" onClick={() => setShowDeleteModal(false)} disabled={isSubmitting}>
-              取消
-            </Button>
-            <Button variant="danger" onClick={handleConfirmDelete} disabled={isSubmitting}>
-              {isSubmitting ? '删除中...' : '确认删除'}
-            </Button>
-          </div>
+          task.parentTaskId ? (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <Button variant="secondary" onClick={() => setShowDeleteModal(false)} disabled={isSubmitting}>
+                取消
+              </Button>
+              <Button variant="secondary" onClick={handleDeleteOnlyInstance} disabled={isSubmitting}>
+                {isSubmitting ? '处理中...' : '仅删除这一次'}
+              </Button>
+              <Button variant="danger" onClick={handleDeleteEntireParent} disabled={isSubmitting}>
+                {isSubmitting ? '删除中...' : '删除父级日程及所有实例'}
+              </Button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <Button variant="secondary" onClick={() => setShowDeleteModal(false)} disabled={isSubmitting}>
+                取消
+              </Button>
+              <Button variant="danger" onClick={handleDeleteEntireParent} disabled={isSubmitting}>
+                {isSubmitting ? '删除中...' : '确认删除'}
+              </Button>
+            </div>
+          )
         }
       >
-        <p>确定要删除日程 “{task.name}” 吗？此操作无法撤销。</p>
+        {task.parentTaskId ? (
+          <p>这是由父级周常/日常任务生成的实例。你可以选择仅删除这一次，或删除整个父级日程及其所有实例。</p>
+        ) : (
+          <p>这是一个父级日程，删除将同时移除它生成的所有实例。确定要删除父级日程 “{task.name}” 吗？此操作无法撤销。</p>
+        )}
       </Modal>
 
       <Modal

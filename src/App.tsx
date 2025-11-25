@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { WeekProvider } from './context/WeekContext';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { isAuthenticated, removeToken, authEvents } from './services/api';
 import Login from './components/Login';
@@ -40,6 +41,7 @@ function App() {
 
   return (
     <Router>
+      <WeekProvider>
       <div className="app-container">
         <Routes>
           <Route 
@@ -98,6 +100,7 @@ function App() {
           </div>
         </Modal>
       </div>
+      </WeekProvider>
     </Router>
   );
 }

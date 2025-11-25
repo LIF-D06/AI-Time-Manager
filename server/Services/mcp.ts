@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express, { Request, Response } from 'express';
-import type { User } from '../index';
+import type { User, Task } from '../index';
+import type { RecurrenceRule, ScheduleType } from './types';
+import { resolveScheduleType, scheduleTypeValues } from './types.js';
 import { dbService } from './dbService';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../Utils/logger.js';
@@ -9,6 +11,8 @@ import { z } from 'zod';
 import { IEvent } from './types';
 import { findConflictingTasks, TimeLikeTask } from './scheduleConflict';
 import { logUserEvent } from './userLog';
+import { generateRecurrenceInstances, buildRecurrenceSummary } from './recurrence';
+import { broadcastTaskChange } from './websocket';
 
 // Store active transports: sessionId -> Transport
 const transports = new Map<string, SSEServerTransport>();
@@ -34,11 +38,13 @@ export const mcpTools = {
                         return e; // Return basic info if fetch fails
                     }
                 }));
+                //删去邮件body中的html
                 
+
                 const emailSummaries = fullEmails.map(e => ({
                     subject: e.subject,
                     sender: e.from ? e.from.name : 'Unknown',
-                    body: e.body ? e.body.substring(0, 500) + (e.body.length > 500 ? '...' : '') : 'No content'
+                    body: e.body 
                 }));
                 return { content: [{ type: "text" as const, text: JSON.stringify(emailSummaries, null, 2) }] };
             } catch (error: any) {
@@ -54,13 +60,15 @@ export const mcpTools = {
             startTime: z.string().optional().describe("Start time in ISO 8601 format (e.g. 2023-10-01T09:00:00+08:00). If timezone is not specified in the email, assume China Standard Time (UTC+8)."),
             endTime: z.string().optional().describe("End time in ISO 8601 format. If a duration is mentioned, calculate it. If a due date is mentioned, use that. Assume UTC+8 if not specified."),
             description: z.string().optional().describe("Detailed description of the task, including any relevant content from the email body."),
+            recurrenceRule: z.any().optional().describe("Optional recurrence rule object, supports freq 'daily'|'weekly'|'weeklyByWeekNumber'|'dailyOnDays'"),
             location: z.string().optional().describe("Location of the event"),
             type: z.enum(["meeting", "todo"]).optional().describe("Type of the schedule"),
             importance: z.enum(["high", "normal", "low"]).optional().describe("Importance of the task"),
             isReminderOn: z.boolean().optional().describe("Whether to set a reminder"),
+            scheduleType: z.enum(scheduleTypeValues as unknown as [ScheduleType, ...ScheduleType[]]).optional().describe("Explicit schedule type metadata controlling recurrence behavior"),
         },
-        execute: async (args: { name: string, startTime?: string, endTime?: string, description?: string, location?: string, type?: string, importance?: 'high' | 'normal' | 'low', isReminderOn?: boolean }, user: User) => {
-            let { name, startTime, endTime, description, location, importance, isReminderOn } = args;
+        execute: async (args: { name: string, startTime?: string, endTime?: string, description?: string, location?: string, type?: string, importance?: 'high' | 'normal' | 'low', isReminderOn?: boolean, recurrenceRule?: RecurrenceRule, scheduleType?: ScheduleType }, user: User) => {
+            let { name, startTime, endTime, description, location, importance, isReminderOn, recurrenceRule, scheduleType } = args;
             
             if (!name) {
                 return { content: [{ type: "text" as const, text: "Error: Task name is required." }] };
@@ -93,7 +101,21 @@ export const mcpTools = {
                 return { content: [{ type: "text" as const, text: `Error: Invalid date format. Start=${startTime}, End=${endTime}` }] };
             }
 
+            let parsedRecurrence: RecurrenceRule | undefined;
+            let resolvedScheduleType: ScheduleType;
+            try {
+                const resolved = resolveScheduleType({ explicit: scheduleType, recurrence: recurrenceRule, fallback: 'single' });
+                parsedRecurrence = resolved.parsedRecurrence;
+                resolvedScheduleType = resolved.scheduleType;
+            } catch (err: any) {
+                const msg = err?.message?.includes('recurrenceRule') ? 'Invalid recurrenceRule value' : 'Invalid scheduleType value';
+                return { content: [{ type: "text" as const, text: msg }] };
+            }
+
+            const resolvedRecurrenceRule = parsedRecurrence ?? recurrenceRule;
+
             // Check for conflicts
+            let parentConflicts: any[] = [];
             try {
                 // Fetch existing tasks in the time range
                 const { tasks: existingTasks } = await dbService.getTasksPage(user.id, {
@@ -108,16 +130,16 @@ export const mcpTools = {
                     endTime: endTime
                 };
 
-                const conflicts = findConflictingTasks(existingTasks, candidate, { boundaryConflict: !!user.conflictBoundaryInclusive });
+                parentConflicts = findConflictingTasks(existingTasks, candidate, { boundaryConflict: !!user.conflictBoundaryInclusive });
 
-                if (conflicts.length > 0) {
-                    const conflictNames = conflicts.map(t => t.name).join(', ');
+                if (parentConflicts.length > 0 && !resolvedRecurrenceRule) {
+                    const conflictNames = parentConflicts.map(t => t.name).join(', ');
                     const message = `Schedule conflict detected with: ${conflictNames}`;
                     
                     // Trigger user log event
                     await logUserEvent(user.id, 'schedule_conflict', message, {
                         candidate: { name, startTime, endTime },
-                        conflicts: conflicts
+                        conflicts: parentConflicts
                     });
 
                     return { content: [{ type: "text" as const, text: `Task creation skipped due to conflict with: ${conflictNames}. A notification has been sent.` }] };
@@ -126,7 +148,7 @@ export const mcpTools = {
                 logger.error(`Error checking conflicts: ${err}`);
             }
 
-            const newTask = {
+                const newTask: Task = {
                 id: uuidv4(),
                 name,
                 startTime,
@@ -136,14 +158,19 @@ export const mcpTools = {
                 location: location || '',
                 completed: false,
                 pushedToMSTodo: false,
+                scheduleType: resolvedScheduleType,
                 importance: importance || 'normal',
                 isReminderOn: isReminderOn
             };
             try {
-                await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive);
-                await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
+                // If recurrenceRule provided, attach serialized rule to parent task
+                if (resolvedRecurrenceRule) newTask.recurrenceRule = JSON.stringify(resolvedRecurrenceRule);
 
-                // Sync to Exchange Calendar if emsClient is available
+                await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive, true);
+                await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
+                broadcastTaskChange('created', newTask as Task, user.id);
+
+                // Sync to Exchange Calendar if emsClient is available (parent only)
                 if (user.emsClient) {
                     const eventData: IEvent = {
                         subject: newTask.name,
@@ -160,8 +187,64 @@ export const mcpTools = {
                         logger.success(`Task synced to Exchange Calendar: ${newTask.name}`);
                     } catch (exchangeError: any) {
                         logger.error(`Failed to sync task to Exchange Calendar: ${exchangeError.message}`);
-                        // Don't fail the whole operation if exchange sync fails, but maybe warn
                     }
+                }
+
+                // If recurrence rule is present, generate instances and insert them
+                if (resolvedRecurrenceRule) {
+                    const generated = generateRecurrenceInstances(newTask as Task, resolvedRecurrenceRule as RecurrenceRule);
+                    const createdIds: string[] = [newTask.id];
+                    const instanceConflicts: any[] = [];
+                    let createdChildren = 0, errorChildren = 0;
+
+                    for (const inst of generated) {
+                        try {
+                            const instConf = findConflictingTasks(user.tasks || [], inst, { boundaryConflict: !!user.conflictBoundaryInclusive });
+                            if (instConf.length > 0) {
+                                instanceConflicts.push({ instance: { id: inst.id, startTime: inst.startTime, endTime: inst.endTime }, conflicts: instConf.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })) });
+                                await logUserEvent(user.id, 'taskConflict', `Created recurrence instance with conflict ${inst.name}`, { parentId: newTask.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
+                            } else {
+                                await logUserEvent(user.id, 'taskCreated', `Created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
+                            }
+
+                            await dbService.addTask(user.id, inst, !!user.conflictBoundaryInclusive, true);
+                            createdChildren++;
+                            createdIds.push(inst.id);
+                            broadcastTaskChange('created', inst as Task, user.id);
+
+                            // Sync instance to Exchange as separate event if desired
+                            if (user.emsClient) {
+                                const ev: IEvent = {
+                                    subject: inst.name,
+                                    body: inst.description,
+                                    start: inst.startTime,
+                                    end: inst.endTime,
+                                    location: inst.location || '',
+                                    attendees: [],
+                                    importance: inst.importance,
+                                    isReminderOn: inst.isReminderOn
+                                };
+                                try { await user.emsClient.createEvent(ev); } catch (e) { /* ignore */ }
+                            }
+                        } catch (e: any) {
+                            errorChildren++;
+                            await logUserEvent(user.id, 'taskError', `Error creating recurrence instance for ${newTask.name}`, { parentId: newTask.id, error: e?.message });
+                        }
+                    }
+
+                    // Refresh cache with all created ids
+                    await dbService.refreshUserTasksIncremental(user, { addedIds: createdIds });
+
+                    return {
+                        content: [{ type: "text" as const, text: `Task created successfully. ID: ${newTask.id}. Instances created: ${createdChildren}` }],
+                        task: newTask,
+                        recurrenceSummary: buildRecurrenceSummary(resolvedRecurrenceRule as RecurrenceRule, createdChildren, 0, errorChildren),
+                        conflictWarning: (parentConflicts.length > 0 || instanceConflicts.length > 0) ? {
+                            message: 'Task created with time conflicts',
+                            conflicts: parentConflicts.map((c: any) => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })),
+                            instanceConflicts
+                        } : undefined
+                    };
                 }
 
                 return { 
@@ -344,7 +427,7 @@ export function initializeMcpRoutes(app: express.Application, authenticateToken:
         // Workaround: We'll use a custom session ID generation if the SDK allows, or we'll just store it if we can read it.
         // If `transport.sessionId` exists, we use it.
         
-        const sessionId = (transport as any).sessionId;
+        const sessionId = (transport as unknown as { sessionId?: string }).sessionId;
         if (sessionId) {
             transports.set(sessionId, transport);
             
@@ -390,7 +473,9 @@ export function getOpenAITools() {
         // Note: This is a simplified converter for the specific Zod schemas used here.
         // It may not cover all Zod features.
         // Handle both ZodObject (has .shape) and plain object definitions
-        const shape = (tool.schema as any).shape || tool.schema;
+        // tool.schema may be a Zod object with `.shape` or a plain object; handle both
+        const schemaLike = tool.schema as { shape?: Record<string, any> } | Record<string, any>;
+        const shape = (schemaLike && (schemaLike as any).shape) ? (schemaLike as any).shape : tool.schema;
         
         if (shape) {
             for (const paramName in shape) {

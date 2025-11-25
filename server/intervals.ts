@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Options, PythonShell } from 'python-shell';
 import { ExchangeClient } from './Services/exchangeClient';
 import { dbService } from './Services/dbService';
-import { ExchangeConfig } from './Services/types';
+import type { ExchangeConfig, ScheduleType } from './Services/types';
 import { ScheduleConflictError, findConflictingTasks } from './Services/scheduleConflict';
 import { broadcastTaskChange } from './Services/websocket';
 import { logUserEvent } from './Services/userLog';
@@ -29,6 +29,7 @@ export interface Task {
     parentTaskId?: string;
     importance?: 'high' | 'normal' | 'low';
     isReminderOn?: boolean;
+    scheduleType?: ScheduleType;
 }
 
 export interface User {
@@ -119,6 +120,7 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
                             dueDate: event.end,
                             completed: false,
                             pushedToMSTodo: false,
+                            scheduleType: 'single',
                             importance: event.importance,
                             isReminderOn: event.isReminderOn,
                         } as Task;

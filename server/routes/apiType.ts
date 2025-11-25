@@ -2,6 +2,7 @@
 // 注意：这些类型仅用于编译期约束，不参与运行时校验
 
 import { Task } from '../index';
+import type { RecurrenceRule, ScheduleType } from '../Services/types';
 
 export interface StatusMicrosoftTodoResponse {
   connected: boolean;
@@ -32,13 +33,8 @@ export interface TaskCreateRequest {
   dueDate?: string;  // ISO
   location?: string;
   boundaryConflict?: boolean; // 请求级覆盖用户级边界模式
-  recurrenceRule?: {
-    freq: 'daily' | 'weekly';
-    interval?: number; // 默认 1
-    count?: number; // 生成次数（与 until 二选一优先 count）
-    until?: string; // ISO 截止日期（不含当天超过则停止）
-    byDay?: string[]; // 仅 weekly 使用: ['Mon','Wed','Fri'] 等
-  };
+  recurrenceRule?: RecurrenceRule;
+  scheduleType?: ScheduleType;
 }
 
 export interface TaskCreateResponse {
@@ -114,13 +110,8 @@ export interface TaskUpdateRequest {
   location?: string;
   completed?: boolean;
   boundaryConflict?: boolean; // 请求级覆盖
-  recurrenceRule?: {
-    freq: 'daily' | 'weekly';
-    interval?: number;
-    count?: number;
-    until?: string;
-    byDay?: string[];
-  } | null; // null 表示移除重复规则
+  recurrenceRule?: RecurrenceRule | null; // null 表示移除重复规则
+  scheduleType?: ScheduleType;
 }
 
 // 重复任务生成统计

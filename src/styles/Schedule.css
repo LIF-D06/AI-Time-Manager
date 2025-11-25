@@ -23,6 +23,20 @@
   flex-wrap: wrap;
 }
 
+.week-badge {
+  font-size: 0.85rem;
+  color: var(--color-neutral-700);
+  background: var(--color-neutral-100);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+
+/* Today-week badge default hidden; shown only on mobile via media query */
+.today-week-badge {
+  display: none;
+}
+
 .header-right {
   display: flex;
   align-items: center;
@@ -893,8 +907,48 @@
     width: 40px;
   }
 
+  /* Hide week badge on narrow screens to avoid header wrapping */
+  .week-badge {
+    display: none;
+  }
+
+  /* Hide the "全部日程" title on mobile to save header space */
+  /* .all-schedule-title {
+    display: none;
+  } */
+
+  /* Make the month/week view toggle more compact on mobile while keeping original styling */
+  .view-controls .filter-group {
+    padding: 2px;
+  }
+
+  .view-controls .filter-btn {
+    padding: 4px 8px;
+    font-size: 0.78rem;
+    border-radius: 6px;
+  }
+
+  .view-controls .filter-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* Today button: show small week badge on mobile */
+  .today-week-badge {
+    display: inline-block;
+    margin-left: 3px;
+    font-size: 0.70rem;
+    color: var(--color-neutral-700);
+  }
+
   .time-axis .time-label {
     padding-right: 4px;
+  }
+
+  /* Make date-navigation align to the left on mobile, leaving add button on the right */
+  .date-navigation {
+    margin-right: auto;
+    margin-left: 0;
   }
 
   .time-axis .time-label span {

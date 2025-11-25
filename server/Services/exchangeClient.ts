@@ -333,6 +333,7 @@ export class ExchangeClient {
                 location: appointment.Location || '',
                 completed: false,
                 pushedToMSTodo: false,
+                scheduleType: 'single',
                 importance: importance,
                 isReminderOn: appointment.IsReminderSet
             };
@@ -787,13 +788,15 @@ export class ExchangeClient {
      */
     private parseEmailFromEWS(email: EmailMessage, includeBody: boolean = false): IEmail {
         const from = email.From;
+        const bodyText = includeBody ? this.cleanHtmlContent(email.Body?.Text || '') : undefined;
+
         return {
             id: email.Id.UniqueId,
             subject: email.Subject,
             from: from ? { name: from.Name, address: from.Address } : undefined,
             receivedAt: email.DateTimeReceived.MomentDate.toISOString(),
             isRead: email.IsRead,
-            body: includeBody ? email.Body.Text : undefined,
+            body: bodyText,
             hasAttachments: email.HasAttachments,
             attachments: email.Attachments,
         };

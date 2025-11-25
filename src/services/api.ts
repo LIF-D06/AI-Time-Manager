@@ -209,6 +209,13 @@ export const getLogs = async (params?: { limit?: number; offset?: number; type?:
 };
 
 // 获取任务列表
+export type ScheduleType =
+  | 'single'
+  | 'recurring_daily'
+  | 'recurring_weekly'
+  | 'recurring_weekly_by_week_number'
+  | 'recurring_daily_on_days';
+
 export interface Task {
   id: string;
   name: string;
@@ -222,6 +229,7 @@ export interface Task {
   recurrenceRule?: string;
   parentTaskId?: string;
   importance?: 'high' | 'normal' | 'low';
+  scheduleType?: ScheduleType;
 }
 
 export interface TasksResponse {
@@ -378,11 +386,13 @@ export const getTasks = async (params: { start?: string; end?: string; limit?: n
   return await response.json();
 };
 
-export const deleteTask = async (taskId: string): Promise<void> => {
+export const deleteTask = async (taskId: string, cascade: boolean = false): Promise<void> => {
   const token = getToken();
   if (!token) throw new Error('用户未登录');
 
-  const response = await customFetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+  const url = `/api/tasks/${encodeURIComponent(taskId)}${cascade ? '?cascade=true' : ''}`;
+
+  const response = await customFetch(url, {
     method: 'DELETE',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -436,6 +446,49 @@ export const deleteTimetableTasks = async (): Promise<DeleteTimetableResponse> =
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.error || '删除课表日程失败');
+  }
+
+  return response.json();
+};
+
+// 获取当前周信息（含全局与用户偏移）
+export interface WeekInfoResponse {
+  rawWeekNumber: number;
+  globalWeekOffset: number;
+  userWeekOffset: number;
+  effectiveWeek: number;
+}
+
+export const getWeekInfo = async (): Promise<WeekInfoResponse> => {
+  const response = await customFetch(`/api/settings/week`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${getToken()}`,
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || '获取周信息失败');
+  }
+
+  return response.json();
+};
+
+// 设置用户级周偏移或通过提供 currentWeek 来设置当前周
+export const setUserWeek = async (data: { currentWeek?: number; userWeekOffset?: number }): Promise<WeekInfoResponse> => {
+  const response = await customFetch(`/api/settings/week`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || '设置周信息失败');
   }
 
   return response.json();

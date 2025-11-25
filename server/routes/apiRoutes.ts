@@ -6,6 +6,8 @@ import { logger } from '../Utils/logger.js';
 import { dbService } from '../Services/dbService.js';
 import { findConflictingTasks, ScheduleConflictError } from '../Services/scheduleConflict.js';
 import { generateRecurrenceInstances, buildRecurrenceSummary } from '../Services/recurrence.js';
+import { resolveScheduleType } from '../Services/types.js';
+import type { RecurrenceRule, ScheduleType } from '../Services/types';
 import { broadcastTaskChange } from '../Services/websocket.js';
 import { logUserEvent } from '../Services/userLog.js';
 import { LLMApi } from '../Services/LLMApi.js';
@@ -161,9 +163,19 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
   router.post('/tasks', authenticateToken, async (req: any, res: any) => {
     try {
       const user = req.user as User;
-      const { name, description, startTime, endTime, dueDate, location, boundaryConflict, recurrenceRule, importance } = req.body || {};
+      const { name, description, startTime, endTime, dueDate, location, boundaryConflict, recurrenceRule: recurrenceRuleInput, importance, scheduleType: scheduleTypeInput } = req.body || {};
       if (!name || !startTime || !endTime) {
         return res.status(400).json({ error: 'name, startTime, endTime required' });
+      }
+      let parsedRecurrence: RecurrenceRule | undefined;
+      let resolvedScheduleType: ScheduleType;
+      try {
+        const resolved = resolveScheduleType({ explicit: scheduleTypeInput, recurrence: recurrenceRuleInput, fallback: 'single' });
+        parsedRecurrence = resolved.parsedRecurrence;
+        resolvedScheduleType = resolved.scheduleType;
+      } catch (err: any) {
+        const msg = err?.message?.includes('recurrenceRule') ? 'Invalid recurrenceRule value' : 'Invalid scheduleType value';
+        return res.status(400).json({ error: msg });
       }
       const task: Task = {
         id: uuidv4(),
@@ -176,9 +188,10 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         completed: false,
         pushedToMSTodo: false,
         importance: importance || 'normal',
+        scheduleType: resolvedScheduleType,
       };
       const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
-      if (recurrenceRule) task.recurrenceRule = JSON.stringify(recurrenceRule);
+      if (parsedRecurrence) task.recurrenceRule = JSON.stringify(parsedRecurrence);
       
       // 冲突检测
       const conflicts = findConflictingTasks(user.tasks || [], task, { boundaryConflict: effectiveBoundary });
@@ -199,8 +212,8 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       const createdIds: string[] = [task.id];
       const instanceConflicts: any[] = [];
 
-      if (recurrenceRule) {
-        const generated = generateRecurrenceInstances(task, recurrenceRule);
+      if (parsedRecurrence) {
+        const generated = generateRecurrenceInstances(task, parsedRecurrence);
         for (const inst of generated) {
             try {
             const instConf = findConflictingTasks(user.tasks || [], inst, { boundaryConflict: effectiveBoundary });
@@ -228,7 +241,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       await dbService.refreshUserTasksIncremental(user, { addedIds: createdIds });
       return res.status(201).json({
         task,
-        recurrenceSummary: buildRecurrenceSummary(recurrenceRule, createdChildren, 0, errorChildren),
+        recurrenceSummary: buildRecurrenceSummary(parsedRecurrence, createdChildren, 0, errorChildren),
         conflictWarning: (conflicts.length > 0 || instanceConflicts.length > 0) ? {
             message: 'Task created with time conflicts',
             conflicts: conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })),
@@ -281,9 +294,21 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       const batchBoundary = boundaryConflict !== undefined ? !!boundaryConflict : undefined;
 
       for (const input of tasks) {
-        const { name, description, startTime, endTime, dueDate, location, recurrenceRule, importance } = input || {};
+        const { name, description, startTime, endTime, dueDate, location, recurrenceRule: recurrenceRuleInput, importance, scheduleType: scheduleTypeInput } = input || {};
         if (!name || !startTime || !endTime) {
           results.push({ input, status: 'error', errorMessage: 'name, startTime, endTime required' });
+          errors++;
+          continue;
+        }
+        let parsedRecurrence: RecurrenceRule | undefined;
+        let resolvedScheduleType: ScheduleType;
+        try {
+          const resolved = resolveScheduleType({ explicit: scheduleTypeInput, recurrence: recurrenceRuleInput, fallback: 'single' });
+          parsedRecurrence = resolved.parsedRecurrence;
+          resolvedScheduleType = resolved.scheduleType;
+        } catch (err: any) {
+          const errorMessage = err?.message?.includes('recurrenceRule') ? 'Invalid recurrenceRule value' : 'Invalid scheduleType value';
+          results.push({ input, status: 'error', errorMessage });
           errors++;
           continue;
         }
@@ -299,8 +324,9 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
           completed: false,
           pushedToMSTodo: false,
           importance: importance || 'normal',
+          scheduleType: resolvedScheduleType,
         };
-        if (recurrenceRule) task.recurrenceRule = JSON.stringify(recurrenceRule);
+        if (parsedRecurrence) task.recurrenceRule = JSON.stringify(parsedRecurrence);
         
         const conflicts = findConflictingTasks(user.tasks || [], task, { boundaryConflict: effectiveBoundary });
 
@@ -318,8 +344,8 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
           const createdIds: string[] = [task.id];
           const instanceConflicts: any[] = [];
 
-          if (recurrenceRule) {
-            const generated = generateRecurrenceInstances(task, recurrenceRule);
+          if (parsedRecurrence) {
+            const generated = generateRecurrenceInstances(task, parsedRecurrence);
             for (const inst of generated) {
               try {
                 const instConf = findConflictingTasks(user.tasks || [], inst, { boundaryConflict: effectiveBoundary });
@@ -346,7 +372,7 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
                 input, 
                 status: 'created', 
                 task, 
-                recurrenceSummary: buildRecurrenceSummary(recurrenceRule, createdChildren, 0, errorChildren),
+                recurrenceSummary: buildRecurrenceSummary(parsedRecurrence, createdChildren, 0, errorChildren),
                 conflictWarning: (conflicts.length > 0 || instanceConflicts.length > 0) ? {
                     message: 'Task created with time conflicts',
                     conflicts: conflicts.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })),
@@ -400,6 +426,84 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
     }
   });
 
+  // 获取当前周信息（包含全局偏移与用户偏移）
+  router.get('/settings/week', authenticateToken, async (req: any, res: any) => {
+    try {
+      const user = req.user as User;
+      // 计算原始周次（不含任何偏移）
+      const academicWeekOffset = parseInt(process.env.ACADEMIC_WEEK_OFFSET || '0', 10) || 0;
+      const academicYearStartMonth = parseInt(process.env.ACADEMIC_YEAR_START_MONTH || '9', 10) || 9;
+      const academicYearStartDay = parseInt(process.env.ACADEMIC_YEAR_START_DAY || '1', 10) || 1;
+
+      const currentDate = new Date();
+      const year = currentDate.getFullYear();
+      let academicYearStart: Date;
+      if (currentDate.getMonth() >= academicYearStartMonth - 1) {
+        academicYearStart = new Date(year, academicYearStartMonth - 1, academicYearStartDay);
+      } else {
+        academicYearStart = new Date(year - 1, academicYearStartMonth - 1, academicYearStartDay);
+      }
+
+      const timeDiff = currentDate.getTime() - academicYearStart.getTime();
+      const dayDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
+      const rawWeekNumber = Math.ceil((dayDiff + 1) / 7);
+
+      const globalWeekOffset = academicWeekOffset;
+      const userWeekOffset = user && typeof user.weekOffset === 'number' ? user.weekOffset : 0;
+
+      const effectiveWeek = Math.max(1, rawWeekNumber + globalWeekOffset + (userWeekOffset || 0));
+
+      return res.status(200).json({ rawWeekNumber, globalWeekOffset, userWeekOffset: userWeekOffset || 0, effectiveWeek });
+    } catch (error) {
+      logger.error('Failed to get week info:', error);
+      return res.status(500).json({ error: 'Failed to get week info' });
+    }
+  });
+
+  // 更新用户级周数偏移（可通过提供currentWeek来设置当前周数）
+  router.post('/settings/week', authenticateToken, async (req: any, res: any) => {
+    try {
+      const user = req.user as User;
+      const { currentWeek, userWeekOffset } = req.body || {};
+
+      const academicWeekOffset = parseInt(process.env.ACADEMIC_WEEK_OFFSET || '0', 10) || 0;
+      const academicYearStartMonth = parseInt(process.env.ACADEMIC_YEAR_START_MONTH || '9', 10) || 9;
+      const academicYearStartDay = parseInt(process.env.ACADEMIC_YEAR_START_DAY || '1', 10) || 1;
+
+      const currentDate = new Date();
+      const year = currentDate.getFullYear();
+      let academicYearStart: Date;
+      if (currentDate.getMonth() >= academicYearStartMonth - 1) {
+        academicYearStart = new Date(year, academicYearStartMonth - 1, academicYearStartDay);
+      } else {
+        academicYearStart = new Date(year - 1, academicYearStartMonth - 1, academicYearStartDay);
+      }
+      const timeDiff = currentDate.getTime() - academicYearStart.getTime();
+      const dayDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
+      const rawWeekNumber = Math.ceil((dayDiff + 1) / 7);
+
+      let newUserOffset = typeof userWeekOffset === 'number' ? userWeekOffset : undefined;
+      if (typeof currentWeek === 'number') {
+        // 计算需要设置的 user offset，使得 raw + global + userOffset === currentWeek
+        newUserOffset = currentWeek - (rawWeekNumber + academicWeekOffset);
+      }
+
+      if (typeof newUserOffset !== 'number' || isNaN(newUserOffset)) {
+        return res.status(400).json({ error: 'Either currentWeek (number) or userWeekOffset (number) required' });
+      }
+
+      user.weekOffset = Math.trunc(newUserOffset);
+      await dbService.updateUser(user);
+
+      // 返回更新后的信息
+      const effectiveWeek = Math.max(1, rawWeekNumber + academicWeekOffset + (user.weekOffset || 0));
+      return res.status(200).json({ rawWeekNumber, globalWeekOffset: academicWeekOffset, userWeekOffset: (user.weekOffset || 0), effectiveWeek });
+    } catch (error) {
+      logger.error('Failed to set week info:', error);
+      return res.status(500).json({ error: 'Failed to set week info' });
+    }
+  });
+
   // 更新任务（部分字段 + 冲突检测）
   router.put('/tasks/:id', authenticateToken, async (req: any, res: any) => {
     try {
@@ -407,7 +511,21 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       const taskId = req.params.id;
       const existing = user.tasks.find(t => t.id === taskId);
       if (!existing) return res.status(404).json({ error: 'task not found' });
-      const { name, description, startTime, endTime, dueDate, location, completed, boundaryConflict, importance } = req.body || {};
+      const { name, description, startTime, endTime, dueDate, location, completed, boundaryConflict, importance, recurrenceRule: recurrenceRuleInput, scheduleType: scheduleTypeInput } = req.body || {};
+      const recurrenceSource = recurrenceRuleInput !== undefined ? recurrenceRuleInput : existing.recurrenceRule;
+      let parsedRecurrence: RecurrenceRule | undefined;
+      let resolvedScheduleType: ScheduleType;
+      try {
+        const resolved = resolveScheduleType({ explicit: scheduleTypeInput, recurrence: recurrenceSource, fallback: existing.scheduleType || 'single' });
+        parsedRecurrence = resolved.parsedRecurrence;
+        resolvedScheduleType = resolved.scheduleType;
+      } catch (err: any) {
+        const msg = err?.message?.includes('recurrenceRule') ? 'Invalid recurrenceRule value' : 'Invalid scheduleType value';
+        return res.status(400).json({ error: msg });
+      }
+      const recurrenceString = recurrenceRuleInput !== undefined
+        ? (parsedRecurrence ? JSON.stringify(parsedRecurrence) : undefined)
+        : existing.recurrenceRule;
 
       // 构建更新后的任务对象（不直接修改原对象，先复制）
       const updated: Task = {
@@ -420,6 +538,8 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         location: location !== undefined ? location : existing.location,
         completed: completed !== undefined ? !!completed : existing.completed,
         importance: importance !== undefined ? importance : existing.importance,
+        scheduleType: resolvedScheduleType,
+        recurrenceRule: recurrenceString,
       };
       try {
         const effectiveBoundary = boundaryConflict !== undefined ? !!boundaryConflict : !!user.conflictBoundaryInclusive;
@@ -482,6 +602,31 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         const existingTask = await dbService.getTaskById(taskId);
         if (!existingTask) {
             return res.status(404).json({ error: 'Task not found' });
+        }
+
+        const scheduleTypeExplicit = updates.scheduleType;
+        const recurrenceProvided = Object.prototype.hasOwnProperty.call(updates, 'recurrenceRule');
+        const recurrenceSource = recurrenceProvided ? updates.recurrenceRule : existingTask.recurrenceRule;
+        let parsedRecurrence: RecurrenceRule | undefined;
+        let resolvedScheduleType: ScheduleType;
+        try {
+          const resolved = resolveScheduleType({
+            explicit: scheduleTypeExplicit,
+            recurrence: recurrenceSource,
+            fallback: existingTask.scheduleType || 'single'
+          });
+          parsedRecurrence = resolved.parsedRecurrence;
+          resolvedScheduleType = resolved.scheduleType;
+        } catch (err: any) {
+          const msg = err?.message?.includes('recurrenceRule') ? 'Invalid recurrenceRule value' : 'Invalid scheduleType value';
+          return res.status(400).json({ error: msg });
+        }
+
+        if (recurrenceProvided) {
+          updates.recurrenceRule = parsedRecurrence ? JSON.stringify(parsedRecurrence) : null;
+        }
+        if (scheduleTypeExplicit !== undefined || recurrenceProvided) {
+          updates.scheduleType = resolvedScheduleType;
         }
 
         const wasCompleted = existingTask.completed;
@@ -598,12 +743,40 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
         offNum = Math.max(0, parseInt((offset as string) || '0', 10) || 0);
       }
 
-      const opts: any = { start: start as string | undefined, end: end as string | undefined, q: q as string | undefined, completed: typeof completed === 'string' ? (completed.toLowerCase() === 'true') : undefined, limit: limNum, offset: offNum, sortBy: sortBy as string | undefined, order: (order as any) };
+      const parsedCompleted = typeof completed === 'string' ? (completed.toLowerCase() === 'true') : undefined;
+      const parsedOrder = (order && (order as string).toLowerCase() === 'desc') ? 'desc' : 'asc';
+      const opts: { start?: string; end?: string; q?: string; completed?: boolean; limit: number; offset: number; sortBy?: string; order?: 'asc' | 'desc' } = { start: start as string | undefined, end: end as string | undefined, q: q as string | undefined, completed: parsedCompleted as boolean | undefined, limit: limNum, offset: offNum, sortBy: sortBy as string | undefined, order: parsedOrder };
       const { tasks, total } = await dbService.getTasksPage(user.id, opts);
       return res.status(200).json({ tasks, total, limit: limNum, offset: offNum, sortBy: opts.sortBy || 'startTime', order: opts.order || 'asc' });
     } catch (error) {
       logger.error('Failed to list tasks:', error);
       return res.status(500).json({ error: 'Failed to list tasks' });
+    }
+  });
+
+  // 列出所有父级日程（即带有 recurrenceRule 的根任务）及其子实例
+  router.get('/tasks/parents', authenticateToken, async (req: any, res: any) => {
+    try {
+      const user = req.user as User;
+      // 拉取所有任务并筛选父任务
+      const { tasks } = await dbService.getTasksPage(user.id, { limit: 1000 });
+      const parents = tasks.filter(t => t.recurrenceRule && !t.parentTaskId);
+
+      const result: any[] = [];
+      for (const p of parents) {
+        try {
+          const { occurrences, total } = await dbService.getOccurrencesPage(user.id, p.id, { limit: 1000 });
+          result.push({ parentTask: p, occurrences, total });
+        } catch (e) {
+          // 如果某个父任务查询失败，仍继续处理其它任务
+          result.push({ parentTask: p, occurrences: [], total: 0, error: (e as Error).message });
+        }
+      }
+
+      return res.status(200).json({ parents: result });
+    } catch (error) {
+      logger.error('Failed to list parent tasks:', error);
+      return res.status(500).json({ error: 'Failed to list parent tasks' });
     }
   });
 
@@ -626,7 +799,8 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
 
       const root = await dbService.getTaskById(rootId);
       if (!root) return res.status(404).json({ error: 'Task not found' });
-      const { occurrences, total } = await dbService.getOccurrencesPage(user.id, rootId, { limit: limNum, offset: offNum, sortBy: sortBy as string, order: (order as any) });
+      const parsedOrder = (order && (order as string).toLowerCase() === 'desc') ? 'desc' : 'asc';
+      const { occurrences, total } = await dbService.getOccurrencesPage(user.id, rootId, { limit: limNum, offset: offNum, sortBy: sortBy as string, order: parsedOrder });
       return res.status(200).json({ rootTask: root, occurrences, total, limit: limNum, offset: offNum, sortBy: sortBy || 'startTime', order: order || 'asc' });
     } catch (e) {
       logger.error('Fetch occurrences failed', e);

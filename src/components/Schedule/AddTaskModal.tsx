@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { format, parseISO } from 'date-fns';
-import { createTask, createTasksBatch, ScheduleConflictError, type Task } from '../../services/api';
+import { createTask, createTasksBatch, ScheduleConflictError, type Task, type ScheduleType } from '../../services/api';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -27,6 +27,9 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
     location: '',
     importance: 'normal' as 'high' | 'normal' | 'low',
   });
+  const [recurrenceType, setRecurrenceType] = useState<'none' | 'dailyOnDays' | 'weeklyByWeekNumber'>('none');
+  const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]); // 0-6
+  const [recurrenceWeeks, setRecurrenceWeeks] = useState<string>(''); // comma separated numbers
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConflictModal, setShowConflictModal] = useState(false);
@@ -106,6 +109,7 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
               endTime: currentEvent.dtEnd.toISOString(),
               dueDate: currentEvent.dtEnd.toISOString(),
               pushedToMSTodo: false,
+              scheduleType: 'single',
             });
           }
           currentEvent = null;
@@ -170,7 +174,9 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
 
     try {
       const todayStr = format(new Date(), 'yyyy-MM-dd');
-      let taskData;
+      let taskData: any;
+
+      let scheduleType: ScheduleType = 'single';
 
       if (taskType === 'interval') {
         const startTime = new Date(`${todayStr}T${newTask.startTime}`);
@@ -184,6 +190,7 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
           dueDate: endTime.toISOString(),
           pushedToMSTodo: false,
           importance: newTask.importance,
+          scheduleType,
         };
       } else { // point task
         const dueDate = new Date(newTask.dueDate);
@@ -196,7 +203,26 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
           dueDate: dueDate.toISOString(),
           pushedToMSTodo: false,
           importance: newTask.importance,
+          scheduleType,
         };
+      }
+
+      // attach recurrenceRule if user selected recurrence
+      if (recurrenceType !== 'none') {
+        if (recurrenceType === 'dailyOnDays') {
+          taskData.recurrenceRule = {
+            freq: 'dailyOnDays',
+            days: recurrenceDays
+          };
+          taskData.scheduleType = 'recurring_daily_on_days';
+        } else if (recurrenceType === 'weeklyByWeekNumber') {
+          const weeks = recurrenceWeeks.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+          taskData.recurrenceRule = {
+            freq: 'weeklyByWeekNumber',
+            weeks
+          };
+          taskData.scheduleType = 'recurring_weekly_by_week_number';
+        }
       }
 
       const result = await createTask(taskData);
@@ -355,6 +381,36 @@ const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, onTaskCrea
               </div>
             </div>
           )}
+          
+          <div style={{ marginTop: 8 }}>
+            <label className="ui-label">重复类型 (可选)</label>
+            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+              <Button variant={recurrenceType === 'none' ? 'primary' : 'secondary'} onClick={() => setRecurrenceType('none')}>无</Button>
+              <Button variant={recurrenceType === 'dailyOnDays' ? 'primary' : 'secondary'} onClick={() => setRecurrenceType('dailyOnDays')}>日常任务</Button>
+              <Button variant={recurrenceType === 'weeklyByWeekNumber' ? 'primary' : 'secondary'} onClick={() => setRecurrenceType('weeklyByWeekNumber')}>周常任务</Button>
+            </div>
+
+            {recurrenceType === 'dailyOnDays' && (
+              <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {['日','一','二','三','四','五','六'].map((label, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={`filter-btn ${recurrenceDays.includes((idx)%7) ? 'active' : ''}`}
+                    onClick={() => {
+                      setRecurrenceDays(prev => prev.includes(idx) ? prev.filter(d=>d!==idx) : [...prev, idx]);
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            )}
+
+            {recurrenceType === 'weeklyByWeekNumber' && (
+              <div style={{ marginTop: 8 }}>
+                <Input label="周序号 (逗号分隔, ISO 周数)" name="recurrenceWeeks" value={recurrenceWeeks} onChange={(e)=>setRecurrenceWeeks(e.target.value)} placeholder="例如: 1,2,3,5" />
+              </div>
+            )}
+          </div>
         </div>
       </Modal>
 

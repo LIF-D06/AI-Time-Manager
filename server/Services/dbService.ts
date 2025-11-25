@@ -88,10 +88,26 @@ class DatabaseService {
                 logger.info('conflictBoundaryInclusive column already exists or error adding it:', (e as Error).message);
             }
 
+            // 如果缺少 weekOffset 字段则添加（用户可配置的周数偏移量）
+            try {
+                await this.db.exec(`ALTER TABLE users ADD COLUMN weekOffset INTEGER DEFAULT 0;`);
+            } catch (e) {
+                logger.info('weekOffset column already exists or error adding it:', (e as Error).message);
+            }
+
             // tasks 表新增列（迁移场景）
             try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN recurrenceRule TEXT;`); } catch (e) { logger.info('recurrenceRule column exists or error:', (e as Error).message); }
             try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN parentTaskId TEXT;`); } catch (e) { logger.info('parentTaskId column exists or error:', (e as Error).message); }
             try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN importance TEXT DEFAULT 'normal';`); } catch (e) { logger.info('importance column exists or error:', (e as Error).message); }
+            try { await this.db.exec(`ALTER TABLE tasks ADD COLUMN scheduleType TEXT DEFAULT 'single';`); } catch (e) { logger.info('scheduleType column exists or error:', (e as Error).message); }
+            try {
+                await this.db.run(`UPDATE tasks SET scheduleType = 'recurring_daily' WHERE recurrenceRule LIKE '%"freq":"daily"%' AND (scheduleType IS NULL OR scheduleType = '' OR scheduleType = 'single')`);
+                await this.db.run(`UPDATE tasks SET scheduleType = 'recurring_weekly' WHERE recurrenceRule LIKE '%"freq":"weekly"%' AND (scheduleType IS NULL OR scheduleType = '' OR scheduleType = 'single')`);
+                await this.db.run(`UPDATE tasks SET scheduleType = 'recurring_weekly_by_week_number' WHERE recurrenceRule LIKE '%"freq":"weeklyByWeekNumber"%' AND (scheduleType IS NULL OR scheduleType = '' OR scheduleType = 'single')`);
+                await this.db.run(`UPDATE tasks SET scheduleType = 'recurring_daily_on_days' WHERE recurrenceRule LIKE '%"freq":"dailyOnDays"%' AND (scheduleType IS NULL OR scheduleType = '' OR scheduleType = 'single')`);
+            } catch (e) {
+                logger.info('scheduleType backfill skipped or failed:', (e as Error).message);
+            }
             
             // 创建任务表
             await this.db.exec(`
@@ -111,6 +127,7 @@ class DatabaseService {
                     recurrenceRule TEXT,
                     parentTaskId TEXT,
                     importance TEXT DEFAULT 'normal',
+                    scheduleType TEXT DEFAULT 'single',
                     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
@@ -176,13 +193,13 @@ class DatabaseService {
     async addUser(user: User): Promise<void> {
         if (!this.db) throw new Error('Database not initialized');
         
-        await this.db.run(
-            `INSERT INTO users 
-             (id, email, name, XJTLUaccount, XJTLUPassword, passwordHash, JWTtoken, MStoken, MSbinded, ebridgeBinded, timetableUrl, timetableFetchLevel, mailReadingSpan, conflictBoundaryInclusive) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [user.id, user.email, user.name, user.XJTLUaccount, user.XJTLUPassword, user.passwordHash, 
-             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30, user.conflictBoundaryInclusive ? 1 : 0]
-        );
+          await this.db.run(
+          `INSERT INTO users 
+           (id, email, name, XJTLUaccount, XJTLUPassword, passwordHash, JWTtoken, MStoken, MSbinded, ebridgeBinded, timetableUrl, timetableFetchLevel, mailReadingSpan, conflictBoundaryInclusive, weekOffset) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [user.id, user.email, user.name, user.XJTLUaccount, user.XJTLUPassword, user.passwordHash, 
+           user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30, user.conflictBoundaryInclusive ? 1 : 0, user.weekOffset || 0]
+       );
         
         // 保存用户的任务
         for (const task of user.tasks || []) {
@@ -196,53 +213,53 @@ class DatabaseService {
         await this.db.run(
             `UPDATE users 
              SET email = ?, name = ?, XJTLUaccount = ?, XJTLUPassword = ?, passwordHash = ?, 
-                 JWTtoken = ?, MStoken = ?, MSbinded = ?, ebridgeBinded = ?, timetableUrl = ?, timetableFetchLevel = ?, mailReadingSpan = ?, conflictBoundaryInclusive = ?, updatedAt = CURRENT_TIMESTAMP
+                 JWTtoken = ?, MStoken = ?, MSbinded = ?, ebridgeBinded = ?, timetableUrl = ?, timetableFetchLevel = ?, mailReadingSpan = ?, conflictBoundaryInclusive = ?, weekOffset = ?, updatedAt = CURRENT_TIMESTAMP
              WHERE id = ?`,
             [user.email, user.name, user.XJTLUaccount, user.XJTLUPassword, user.passwordHash, 
-             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30, user.conflictBoundaryInclusive ? 1 : 0, user.id]
+             user.JWTtoken, user.MStoken, user.MSbinded ? 1 : 0, user.ebridgeBinded ? 1 : 0, user.timetableUrl, user.timetableFetchLevel || 0, user.mailReadingSpan ?? 30, user.conflictBoundaryInclusive ? 1 : 0, user.weekOffset || 0, user.id]
         );
     }
     
     async getUserById(id: string): Promise<User | null> {
         if (!this.db) throw new Error('Database not initialized');
         
-        const row = await this.db.get(
+        const row: any = await this.db.get(
             'SELECT * FROM users WHERE id = ?',
             [id]
         );
-        
+
         if (!row) return null;
-        
+
         // 获取用户的任务
         const tasks = await this.getTasksByUserId(id);
-        
+
         return this.mapRowToUser(row, tasks);
     }
     
     async getUserByEmail(email: string): Promise<User | null> {
         if (!this.db) throw new Error('Database not initialized');
         
-        const row = await this.db.get(
+        const row: any = await this.db.get(
             'SELECT * FROM users WHERE email = ?',
             [email]
         );
-        
+
         if (!row) return null;
-        
+
         // 获取用户的任务
-        const tasks = await this.getTasksByUserId((row as any).id);
-        
+        const tasks = await this.getTasksByUserId(row.id);
+
         return this.mapRowToUser(row, tasks);
     }
     
     async getAllUsers(): Promise<User[]> {
         if (!this.db) throw new Error('Database not initialized');
         
-        const rows = await this.db.all('SELECT * FROM users');
+        const rows: any[] = await this.db.all('SELECT * FROM users');
         const users: User[] = [];
         
         for (const row of rows) {
-            const tasks = await this.getTasksByUserId((row as any).id);
+            const tasks = await this.getTasksByUserId(row.id);
             users.push(this.mapRowToUser(row, tasks));
         }
         
@@ -260,11 +277,11 @@ class DatabaseService {
         await this.db.run(
             `INSERT INTO tasks 
              (id, userId, name, description, dueDate, startTime, endTime, 
-              location, completed, pushedToMSTodo, body, attendees, recurrenceRule, parentTaskId, importance) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              location, completed, pushedToMSTodo, body, attendees, recurrenceRule, parentTaskId, importance, scheduleType) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [task.id, userId, task.name, task.description, task.dueDate, 
              task.startTime, task.endTime, task.location, task.completed ? 1 : 0, 
-              task.pushedToMSTodo ? 1 : 0, task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.importance || 'normal']
+             task.pushedToMSTodo ? 1 : 0, task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.importance || 'normal', task.scheduleType || 'single']
         );
         
         await this.addUserLog(userId, 'task_created', `Created task ${task.name}`, { taskId: task.id, name: task.name });
@@ -285,12 +302,12 @@ class DatabaseService {
         await this.db.run(
             `UPDATE tasks 
              SET name = ?, description = ?, dueDate = ?, startTime = ?, endTime = ?, 
-                 location = ?, completed = ?, pushedToMSTodo = ?, body = ?, attendees = ?, recurrenceRule = ?, parentTaskId = ?, importance = ?,
+                 location = ?, completed = ?, pushedToMSTodo = ?, body = ?, attendees = ?, recurrenceRule = ?, parentTaskId = ?, importance = ?, scheduleType = ?,
                  updatedAt = CURRENT_TIMESTAMP
              WHERE id = ?`,
             [task.name, task.description, task.dueDate, task.startTime, task.endTime, 
-              task.location, task.completed ? 1 : 0, task.pushedToMSTodo ? 1 : 0, 
-              task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.importance || 'normal', task.id]
+             task.location, task.completed ? 1 : 0, task.pushedToMSTodo ? 1 : 0, 
+             task.body, task.attendees ? JSON.stringify(task.attendees) : null, task.recurrenceRule || null, task.parentTaskId || null, task.importance || 'normal', task.scheduleType || 'single', task.id]
         );
     }
 
@@ -352,7 +369,8 @@ class DatabaseService {
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
             parentTaskId: row.parentTaskId || undefined,
-            importance: row.importance || 'normal'
+            importance: row.importance || 'normal',
+            scheduleType: row.scheduleType || 'single'
         }));
     }
 
@@ -417,7 +435,8 @@ class DatabaseService {
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
             parentTaskId: row.parentTaskId || undefined,
-            importance: row.importance || 'normal'
+            importance: row.importance || 'normal',
+            scheduleType: row.scheduleType || 'single'
         } as Task));
 
         return { tasks, total };
@@ -454,7 +473,8 @@ class DatabaseService {
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
             parentTaskId: row.parentTaskId || undefined,
-            importance: row.importance || 'normal'
+            importance: row.importance || 'normal',
+            scheduleType: row.scheduleType || 'single'
         } as Task));
 
         return { occurrences, total };
@@ -489,7 +509,8 @@ class DatabaseService {
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
             parentTaskId: row.parentTaskId || undefined,
-            importance: row.importance || 'normal'
+            importance: row.importance || 'normal',
+            scheduleType: row.scheduleType || 'single'
         } as Task));
     }
 
@@ -542,7 +563,8 @@ class DatabaseService {
             attendees: row.attendees ? JSON.parse(row.attendees) : undefined,
             recurrenceRule: row.recurrenceRule || undefined,
             parentTaskId: row.parentTaskId || undefined,
-            importance: row.importance || 'normal'
+            importance: row.importance || 'normal',
+            scheduleType: row.scheduleType || 'single'
         } as Task;
     }
 
@@ -598,6 +620,7 @@ class DatabaseService {
             timetableFetchLevel: row.timetableFetchLevel || 0,
             mailReadingSpan: row.mailReadingSpan ?? 30,
             conflictBoundaryInclusive: row.conflictBoundaryInclusive === 1,
+            weekOffset: row.weekOffset || 0,
             tasks: tasks,
             emsClient: undefined // 运行时生成，不持久化
         };

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getTasks, type Task, updateTask } from '../../services/api';
+import { useWeek } from '../../context/WeekContext';
 import { format, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Calendar, Clock, MapPin, CheckCircle2, Circle, Plus, RefreshCw } from 'lucide-react';
@@ -19,6 +20,8 @@ const TodaySchedule: React.FC = () => {
   const [taskToComplete, setTaskToComplete] = useState<Task | null>(null);
   const [isCompleting, setIsCompleting] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const { weekInfo } = useWeek();
+  const effectiveWeek = weekInfo ? weekInfo.effectiveWeek : null;
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -50,6 +53,8 @@ const TodaySchedule: React.FC = () => {
   useEffect(() => {
     fetchTodayTasks();
   }, []);
+
+  // week info provided by WeekContext at app startup
 
   const getStatusColor = (task: Task) => {
     if (task.completed) return 'status-completed';
@@ -93,6 +98,7 @@ const TodaySchedule: React.FC = () => {
           <div className="header-left">
             <CardTitle>今日日程</CardTitle>
             <p className="date-subtitle">{format(new Date(), 'yyyy年MM月dd日 EEEE', { locale: zhCN })}</p>
+            {effectiveWeek !== null && <div className="week-badge">第 {effectiveWeek} 周</div>}
           </div>
           <div className="header-right">
             <Button variant="ghost" size="sm" onClick={fetchTodayTasks} title="刷新日程">

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getTasks, type Task } from '../../services/api';
 import { format, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Search, Filter, Loader2, Calendar, CheckCircle2, Circle } from 'lucide-react';
+import { Search, Loader2, Calendar, CheckCircle2, Circle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';

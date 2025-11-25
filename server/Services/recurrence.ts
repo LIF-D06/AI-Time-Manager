@@ -1,7 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Task } from '../index';
+import { getISOWeek } from 'date-fns';
+import type { RecurrenceRule } from './types';
 
-export function generateRecurrenceInstances(root: Task, rule: any): Task[] {
+export function generateRecurrenceInstances(root: Task, rule: RecurrenceRule | any): Task[] {
   const instances: Task[] = [];
   try {
     const freq = rule.freq;
@@ -24,7 +26,7 @@ export function generateRecurrenceInstances(root: Task, rule: any): Task[] {
         instances.push(buildInstance(root, cursorStart, cursorEnd));
         generated++;
         if (!count && until && cursorStart > until) break;
-        if (!count && !until && generated >= 30) break;
+        if (!count && !until && generated >= 365) break;
       }
     } else if (freq === 'weekly') {
       const rootDay = start.getDay();
@@ -44,7 +46,7 @@ export function generateRecurrenceInstances(root: Task, rule: any): Task[] {
             instances.push(buildInstance(root, cursorStart, cursorEnd));
             generated++;
             if (!count && until && cursorStart > until) break;
-            if (!count && !until && generated >= 30) break;
+            if (!count && !until && generated >= 365) break;
           }
         } else {
           for (const targetDay of byDayIdx) {
@@ -59,10 +61,58 @@ export function generateRecurrenceInstances(root: Task, rule: any): Task[] {
             instances.push(buildInstance(root, cursorStart, cursorEnd));
             generated++;
             if (!count && until && cursorStart > until) break;
-            if (!count && !until && generated >= 30) break;
+            if (!count && !until && generated >= 365) break;
           }
         }
         weekOffset++;
+      }
+    }
+    else if (freq === 'weeklyByWeekNumber') {
+      // rule.weeks: array of ISO week numbers (1-53) when this task should appear
+      const weeks: number[] = Array.isArray(rule.weeks) ? rule.weeks : [];
+      if (weeks.length === 0) return instances;
+      // Iterate week by week starting from start, generate instances on the weekday of start
+      let cursorStart = new Date(start);
+      let cursorEnd = new Date(end);
+      let iterations = 0;
+      while (generated < maxIterations && iterations < 5000) {
+        // advance one week each iteration
+        if (iterations > 0) {
+          cursorStart.setDate(cursorStart.getDate() + 7);
+          cursorEnd.setDate(cursorEnd.getDate() + 7);
+        }
+        const iso = getISOWeek(cursorStart);
+        if (weeks.includes(iso)) {
+          if (cursorStart.getTime() === start.getTime()) { iterations++; continue; }
+          if (until && cursorStart > until) break;
+          instances.push(buildInstance(root, new Date(cursorStart), new Date(cursorEnd)));
+          generated++;
+          if (!count && until && cursorStart > until) break;
+          if (!count && !until && generated >= 365) break;
+        }
+        iterations++;
+      }
+    } else if (freq === 'dailyOnDays') {
+      // rule.days: array of weekday indices 0(Sun)-6(Sat)
+      const days: number[] = Array.isArray(rule.days) ? rule.days : [];
+      if (days.length === 0) return instances;
+      let cursorStart = new Date(start);
+      let cursorEnd = new Date(end);
+      // move forward day by day
+      let iterations = 0;
+      while (generated < maxIterations && iterations < 5000) {
+        cursorStart.setDate(cursorStart.getDate() + 1);
+        cursorEnd.setDate(cursorEnd.getDate() + 1);
+        const w = cursorStart.getDay();
+        if (days.includes(w)) {
+          if (cursorStart.getTime() === start.getTime()) { iterations++; continue; }
+          if (until && cursorStart > until) break;
+          instances.push(buildInstance(root, new Date(cursorStart), new Date(cursorEnd)));
+          generated++;
+          if (!count && until && cursorStart > until) break;
+          if (!count && !until && generated >= 365) break;
+        }
+        iterations++;
       }
     }
   } catch (_) {
@@ -71,7 +121,7 @@ export function generateRecurrenceInstances(root: Task, rule: any): Task[] {
   return instances;
 }
 
-export function buildRecurrenceSummary(rule: any, created: number, conflicts: number, errors: number) {
+export function buildRecurrenceSummary(rule: RecurrenceRule | any, created: number, conflicts: number, errors: number) {
   if (!rule) return null;
   return { createdInstances: created, conflictInstances: conflicts, errorInstances: errors, requestedRule: rule };
 }
@@ -87,6 +137,9 @@ function buildInstance(root: Task, s: Date, e: Date): Task {
     location: root.location,
     completed: false,
     pushedToMSTodo: false,
-    parentTaskId: root.id
+    parentTaskId: root.id,
+    scheduleType: root.scheduleType,
+    importance: root.importance,
+    recurrenceRule: undefined
   } as Task;
 }

@@ -22,6 +22,7 @@ import TodaySchedule from './Schedule/TodaySchedule';
 import SearchTasks from './Schedule/SearchTasks';
 import LogViewer from './Logs/LogViewer';
 import AIChat from './AIChat/AIChat';
+import { useWeek } from '../context/WeekContext';
 import { LayoutDashboard, Calendar, ListTodo, FileText, LogOut, MessageSquare, PanelLeftClose, PanelLeftOpen, Menu, X, Search, RefreshCw, Copy, Check, Trash2, Download, Link } from 'lucide-react';
 import { ToggleButton } from './ui/ToggleButton';
 import '../styles/Dashboard.css';
@@ -66,6 +67,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
   const [showResultModal, setShowResultModal] = useState(false);
   const [showEbridgeConnectModal, setShowEbridgeConnectModal] = useState(false);
   const [resultModalData, setResultModalData] = useState({ title: '', message: '', isError: false });
+  const { weekInfo, setCurrentWeek } = useWeek();
+  const [desiredWeek, setDesiredWeek] = useState<number | ''>('');
+  const [weekLoading, setWeekLoading] = useState(false);
+  const [weekError, setWeekError] = useState('');
+  const [showWeekModal, setShowWeekModal] = useState(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -111,6 +117,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
     };
 
     fetchStatuses();
+    // Week info now provided by WeekContext at startup
   }, []);
 
   const toggleSidebar = () => {
@@ -401,6 +408,29 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle>周次设置</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div>
+                <strong>当前周（含偏移）: </strong>
+                {weekInfo ? weekInfo.effectiveWeek : '加载中...'}
+              </div>
+              <div>
+                <small>学年基准周: {weekInfo ? weekInfo.rawWeekNumber : '-'}, 全局偏移: {weekInfo ? weekInfo.globalWeekOffset : '-'}, 您的偏移: {weekInfo ? weekInfo.userWeekOffset : '-'}</small>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <Button onClick={() => { setWeekError(''); setDesiredWeek(''); setShowWeekModal(true); }}>
+                  设置当前周数
+                </Button>
+              </div>
+              {weekError && <div className="error-message">{weekError}</div>}
+            </div>
+          </CardContent>
+        </Card>
+
         {renderConnectionStatus()}
 
         <Modal
@@ -587,6 +617,52 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
           <p className={resultModalData.isError ? "error-message" : "success-message"} style={{ margin: 0 }}>
             {resultModalData.message}
           </p>
+        </Modal>
+
+        <Modal
+          isOpen={showWeekModal}
+          onClose={() => setShowWeekModal(false)}
+          title="设置当前周数"
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <Button variant="secondary" onClick={() => setShowWeekModal(false)} disabled={weekLoading}>
+                取消
+              </Button>
+              <Button onClick={async () => {
+                setWeekError('');
+                setWeekLoading(true);
+                try {
+                  if (desiredWeek === '') throw new Error('请输入周数');
+                  await setCurrentWeek(Number(desiredWeek));
+                  setShowWeekModal(false);
+                } catch (err: any) {
+                  setWeekError(err.message || '设置失败');
+                } finally {
+                  setWeekLoading(false);
+                }
+              }} disabled={weekLoading}>
+                {weekLoading ? '保存中...' : '保存'}
+              </Button>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <strong>当前周（含偏移）: </strong>{weekInfo ? weekInfo.effectiveWeek : '加载中...'}
+            </div>
+            <div>
+              <small>学年基准周: {weekInfo ? weekInfo.rawWeekNumber : '-'}, 全局偏移: {weekInfo ? weekInfo.globalWeekOffset : '-'}, 您的偏移: {weekInfo ? weekInfo.userWeekOffset : '-'}</small>
+            </div>
+            <Input
+              label="设置当前周数"
+              type="number"
+              id="desiredWeekModal"
+              value={desiredWeek}
+              onChange={(e) => setDesiredWeek(e.target.value === '' ? '' : parseInt(e.target.value))}
+              placeholder="输入想要的当前周（例如 5）"
+            />
+            {weekError && <div className="error-message">{weekError}</div>}
+          </div>
         </Modal>
       </main>
     </div>

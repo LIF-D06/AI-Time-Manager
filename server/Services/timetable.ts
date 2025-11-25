@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { dbService } from './dbService';
-import { TimetableActivity } from './types';
+import type { TimetableActivity, ScheduleType } from './types';
 import { ScheduleConflictError, findConflictingTasks } from './scheduleConflict';
 import { broadcastTaskChange } from './websocket';
 import { logUserEvent } from './userLog';
@@ -25,6 +25,7 @@ export interface Task {
     parentTaskId?: string;
     importance?: 'high' | 'normal' | 'low';
     isReminderOn?: boolean;
+    scheduleType?: ScheduleType;
 }
 
 export interface User {
@@ -169,6 +170,7 @@ export async function syncUserTimetable(user: User, force: boolean = false): Pro
                                         location: activity.location || undefined,
                                         completed: false,
                                         pushedToMSTodo: false,
+                                        scheduleType: 'single',
                                         body: JSON.stringify(activity),
                                     };
                                     try {

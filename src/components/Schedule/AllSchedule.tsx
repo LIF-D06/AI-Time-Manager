@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { getTasks, type Task } from '../../services/api';
-import { format, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, isSameMonth, isSameDay, parseISO, addMonths, subMonths } from 'date-fns';
+import { useWeek } from '../../context/WeekContext';
+import { format, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, isSameMonth, isSameDay, parseISO, addMonths, subMonths, differenceInCalendarWeeks } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, List, Plus } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Button } from '../ui/Button';
+import ViewToggle from '../ui/ViewToggle';
 import AddTaskModal from './AddTaskModal';
 import TaskDetailModal from './TaskDetailModal';
 import '../../styles/Schedule.css';
@@ -17,6 +19,15 @@ const AllSchedule: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const { weekInfo } = useWeek();
+  const effectiveWeek = weekInfo ? weekInfo.effectiveWeek : null;
+
+  // Compute week number for the currently displayed `currentDate` by applying
+  // the same offsets to the rawWeekNumber and shifting by calendar week difference
+  // relative to today. This allows the UI to show the week for the viewed date.
+  const displayedWeek = weekInfo
+    ? (weekInfo.rawWeekNumber + differenceInCalendarWeeks(currentDate, new Date(), { weekStartsOn: 1 }) + (weekInfo.globalWeekOffset || 0) + (weekInfo.userWeekOffset || 0))
+    : null;
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -47,6 +58,8 @@ const AllSchedule: React.FC = () => {
   useEffect(() => {
     fetchTasks();
   }, [currentDate, viewMode]);
+
+  // week info provided by WeekContext at app startup
 
   const navigate = (direction: 'prev' | 'next' | 'today') => {
     if (direction === 'today') {
@@ -226,29 +239,31 @@ const AllSchedule: React.FC = () => {
       <Card className="schedule-container">
         <CardHeader className="schedule-header">
           <div className="header-left">
-            <CardTitle>全部日程</CardTitle>
+            <CardTitle className="all-schedule-title">全部日程</CardTitle>
+            {effectiveWeek !== null && (
+              <div className="week-badge">第 {effectiveWeek} 周</div>
+            )}
             <div className="view-controls">
-              <Button 
-                variant={viewMode === 'month' ? 'primary' : 'outline'} 
-                size="sm"
-                onClick={() => setViewMode('month')}
-              >
-                <CalendarIcon size={16} style={{ marginRight: '6px' }} /> 月视图
-              </Button>
-              <Button 
-                variant={viewMode === 'week' ? 'primary' : 'outline'} 
-                size="sm"
-                onClick={() => setViewMode('week')}
-              >
-                <List size={16} style={{ marginRight: '6px' }} /> 周视图
-              </Button>
+              <ViewToggle
+                value={viewMode}
+                onChange={(v) => setViewMode(v as 'month' | 'week')}
+                options={[
+                  { value: 'month', label: <><CalendarIcon size={16} style={{ marginRight: '6px' }} /> 月视图</> },
+                  { value: 'week', label: <><List size={16} style={{ marginRight: '6px' }} /> 周视图</> },
+                ]}
+              />
             </div>
           </div>
           
           <div className="header-right">
             <div className="date-navigation">
               <Button variant="ghost" size="sm" onClick={() => navigate('prev')}><ChevronLeft size={20} /></Button>
-              <Button variant="outline" size="sm" onClick={() => navigate('today')}>今天</Button>
+              <Button variant="outline" size="sm" onClick={() => navigate('today')}>
+                今天
+                {displayedWeek !== null && (
+                  <span className="today-week-badge"> · 第 {displayedWeek} 周</span>
+                )}
+              </Button>
               <span className="current-date-label">
                 {format(currentDate, 'yyyy年MM月', { locale: zhCN })}
               </span>
