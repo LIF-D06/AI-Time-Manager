@@ -279,7 +279,7 @@ class DatabaseService {
         return users;
     }
     
-    async addTask(userId: string, task: Task, boundaryConflict?: boolean, allowConflict: boolean = false): Promise<void> {
+    async addTask(userId: string, task: Task, boundaryConflict?: boolean, allowConflict: boolean = true): Promise<void> {
         if (!this.db) throw new Error('Database not initialized');
         // 冲突检测：在写入前基于当前用户的任务进行时段冲突检查
         const existing = await this.getTasksByUserId(userId);
@@ -427,24 +427,13 @@ class DatabaseService {
         if (!this.db) throw new Error('Database not initialized');
         const where: string[] = ['userId = ?'];
         const params: any[] = [userId];
-        // Use numeric time comparisons (Unix seconds) to avoid issues with mixed ISO formats
         if (opts?.start) {
-            try {
-                const startSec = Math.floor(new Date(opts.start).getTime() / 1000);
-                where.push("strftime('%s', endTime) >= ?");
-                params.push(startSec);
-            } catch (e) {
-                // ignore invalid date
-            }
+            where.push('endTime >= ?');
+            params.push(opts.start);
         }
         if (opts?.end) {
-            try {
-                const endSec = Math.floor(new Date(opts.end).getTime() / 1000);
-                where.push("strftime('%s', startTime) <= ?");
-                params.push(endSec);
-            } catch (e) {
-                // ignore invalid date
-            }
+            where.push('startTime <= ?');
+            params.push(opts.end);
         }
         if (typeof opts?.completed === 'boolean') {
             where.push('completed = ?');
@@ -457,13 +446,8 @@ class DatabaseService {
         }
 
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-        const requestedSort = opts?.sortBy || 'startTime';
-        const allowed = ['startTime', 'dueDate', 'name', 'endTime'];
-        const sortField = allowed.includes(requestedSort) ? requestedSort : 'startTime';
+        const sortField = ['startTime', 'dueDate', 'name', 'endTime'].includes(opts?.sortBy || '') ? opts!.sortBy : 'startTime';
         const order = opts?.order === 'desc' ? 'DESC' : 'ASC';
-        // If sorting by a time field, sort by numeric epoch seconds
-        const timeFields = ['startTime', 'endTime', 'dueDate'];
-        const orderByExpr = timeFields.includes(sortField) ? `strftime('%s', ${sortField})` : sortField;
         const limit = Math.max(1, Math.min(500, opts?.limit || 50));
         const offset = Math.max(0, opts?.offset || 0);
 
@@ -473,7 +457,7 @@ class DatabaseService {
         const total = countRow ? (countRow.cnt || 0) : 0;
 
         // select with ordering and pagination
-        const sql = `SELECT * FROM tasks ${whereSql} ORDER BY ${orderByExpr} ${order} LIMIT ? OFFSET ?`;
+        const sql = `SELECT * FROM tasks ${whereSql} ORDER BY ${sortField} ${order} LIMIT ? OFFSET ?`;
         const finalParams = params.concat([limit, offset]);
         const rows = await this.db.all(sql, finalParams);
         const tasks = rows.map((row: any) => ({

@@ -25,12 +25,11 @@ browser.eval_js('document.querySelector("body > div.sv-page-wrapper > div.sv-pag
 browser.focusedpage.query_selector("body > div.sv-page-wrapper > div.sv-page-content.sv-container-fluid > div.sv-row > div:nth-child(2) > div > div > div:nth-child(2) > div.sv-list-group.sv-portal-2-col > div > div.sv-tiled-container > div > div > div:nth-child(1) > a").click()
 browser.wait_for_load()
 browser.focusedpage.get_by_role("button", name=" Timetables ").click()
-try:
-    browser.click("#popup > div:nth-child(2) > center > button")
-except:
-    pass
 browser.eval_js('window.location = document.querySelector("#collapsible-panel-I7").childNodes[3].childNodes[1].childNodes[1].childNodes[0].childNodes[0].childNodes[3].childNodes[5].childNodes[3].childNodes[0].href')
+# browser.focusedpage.get_by_role("row", name="My Class Timetable Timetables").get_by_role("link").click()
+
 time.sleep(1)
+browser.focusedpage.get_by_role("button", name="确定").click()
 browser.focusedpage.query_selector("body > div.sv-page-wrapper > div.sv-page-content.sv-container-fluid > div.sv-row > div > div:nth-child(2) > div.sv-list-group > div > div > div.sv-row > div > div:nth-child(1) > div > a > div").click()
 print(browser.eval_js("document.getElementById('myFrame').src"))
 time.sleep(2)

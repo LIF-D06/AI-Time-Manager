@@ -32,24 +32,7 @@ export interface Task {
     scheduleType?: ScheduleType;
 }
 
-export interface User {
-    timetableUrl: string;
-    timetableFetchLevel: number;
-    mailReadingSpan: number;
-    id: string;
-    email: string;
-    name: string;
-    XJTLUaccount?: string;
-    XJTLUPassword?: string;
-    passwordHash?: string;
-    JWTtoken?: string;
-    MStoken?: string;
-    MSbinded: boolean;
-    ebridgeBinded: boolean;
-    tasks: Task[];
-    emsClient?: ExchangeClient;
-    conflictBoundaryInclusive?: boolean;
-}
+import type { User } from './index';
 
 const JWT_SECRET = process.env.JWT_SECRET || '';
 function verifyJwt(token: string) {
@@ -128,7 +111,7 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
                             // Check for conflicts but don't block
                             const conflicts = findConflictingTasks(user.tasks, newTask, { boundaryConflict: !!user.conflictBoundaryInclusive });
 
-                            await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive, true);
+                            await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive, user.isConflictScheduleAllowed);
                             broadcastTaskChange('created', newTask, user.id);
                             await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
                             
@@ -154,9 +137,12 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
             if (user.mailReadingSpan > 0 && user.emsClient) {
                 try {
                     logger.info(`Reading email for user ${user.id}, remaining span: ${user.mailReadingSpan}`);
-                    const emails = await user.emsClient.findEmails(Number(process.env.EMAIL_READ_LIMIT) || 30);
+                    const emails = await user.emsClient.findEmails(user.mailReadingSpan);
                     const email = emails[user.mailReadingSpan - 1];
                     const fullEmail = await user.emsClient.getEmailById(email.id);
+
+
+
                     await user.emsClient.autoProcessNewEmail(fullEmail);
                     await logUserEvent(user.id, 'emailProcessed', `Processed email: ${fullEmail.subject}`, { emailId: email.id, subject: fullEmail.subject });
                     user.mailReadingSpan--;
@@ -172,11 +158,7 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
                 if (!task.pushedToMSTodo) {
                     // Skip MS Graph actions if user has no token or has been paused due to previous 401
                     if (!user.MStoken) continue;
-                    if (!user.MStoken) continue;
-                    if (!user.MSbinded) {
-                        // User marked unbound - skip pushing
-                        continue;
-                    }
+                    if (!user.MSbinded) continue;
                     const msToken = user.MStoken;
                     const graphEndpoint = `https://graph.microsoft.com/v1.0/me/todo/lists`;
                     const headers = { Authorization: `Bearer ${msToken}`, 'Content-Type': 'application/json' };
@@ -250,6 +232,7 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
     const interval2 = setInterval(() => {
         for (const user of getUsers()) {
             if ((!user.timetableUrl) && user.XJTLUPassword) {
+                console.log('Starting Ebridge connection check for user', user.XJTLUPassword);
                 (async () => {
                     try {
                         const pythonScriptPath = './server/Services/ebEmulator/ebridge.py';

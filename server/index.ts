@@ -4,8 +4,8 @@ import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
-import {ExchangeClient} from './Services/exchangeClient';
-import {dbService} from './Services/dbService';
+import { ExchangeClient } from './Services/exchangeClient';
+import { dbService } from './Services/dbService';
 import moment from 'moment';
 import { initializeApiRoutes } from './routes/apiRoutes';
 import { Options, PythonShell } from 'python-shell';
@@ -81,17 +81,18 @@ export interface User {
     id: string;
     email: string;
     name: string;
-    XJTLUaccount?: string; 
-    XJTLUPassword?: string; 
+    XJTLUaccount?: string;
+    XJTLUPassword?: string;
     passwordHash?: string; // only for local accounts
     JWTtoken?: string; // latest issued JWT for user (optional)
     MStoken?: string; // Microsoft access token (optional)
-        MSbinded: boolean; // 是否绑定了 Microsoft 账号
-        ebridgeBinded: boolean; // 是否绑定了 ebridge 账号
+    MSbinded: boolean; // 是否绑定了 Microsoft 账号
+    ebridgeBinded: boolean; // 是否绑定了 ebridge 账号
     weekOffset?: number; // 用户自定义周数偏移量，叠加在全局偏移之上
     tasks: Task[]; // 用户绑定的任务列表
     emsClient?: ExchangeClient; // 用于操作 Exchange 的客户端
     conflictBoundaryInclusive?: boolean; // 端点相接是否算冲突（true=算）
+    isConflictScheduleAllowed?: boolean; // 是否允许冲突的日程存在
 }
 
 
@@ -118,7 +119,7 @@ async function findUserByEmail(email: string) {
     for (const u of userCache.values()) {
         if (u.email.toLowerCase() === email.toLowerCase()) return u;
     }
-    
+
     // 从数据库中查找
     const user = await dbService.getUserByEmail(email);
     if (user) {
@@ -130,17 +131,17 @@ async function findUserByEmail(email: string) {
 
 async function pairMsTokenToUser(userId: string, msToken: string) {
     let u = userCache.get(userId);
-    
+
     if (!u) {
         // 从数据库加载
         u = await dbService.getUserById(userId) || undefined;
         if (!u) return false;
     }
-    
+
     u.MStoken = msToken;
     u.MSbinded = true; // 标记为已绑定并激活
     // 新的 token 到来，标记为已绑定
-    
+
     // 更新数据库和缓存
     await dbService.updateUser(u);
     userCache.set(userId, u);
@@ -183,11 +184,11 @@ logger.info('Microsoft configuration loaded from environment variables');
 // 获取当前学年的周次
 function getCurrentWeekNumber(): number {
     const { weekOffset, academicYearStartMonth, academicYearStartDay } = academicConfig.academicYearSettings;
-    
+
     // 学年从指定月份和日期开始
     const currentDate = new Date();
     const year = currentDate.getFullYear();
-    
+
     // 确定当前学年的起始日期
     let academicYearStart: Date;
     if (currentDate.getMonth() >= academicYearStartMonth - 1) { // 当前月份大于等于学年开始月份
@@ -195,35 +196,35 @@ function getCurrentWeekNumber(): number {
     } else {
         academicYearStart = new Date(year - 1, academicYearStartMonth - 1, academicYearStartDay);
     }
-    
+
     // 计算当前日期与学年开始日期的天数差
     const timeDiff = currentDate.getTime() - academicYearStart.getTime();
     const dayDiff = Math.floor(timeDiff / (1000 * 3600 * 24));
-    
+
     // 计算周次（向上取整）并应用偏移量
     const rawWeekNumber = Math.ceil((dayDiff + 1) / 7);
     const adjustedWeekNumber = rawWeekNumber + weekOffset;
-    
+
     return Math.max(1, adjustedWeekNumber); // 确保周数至少为1
 }
 
 // 身份验证中间件
 async function authenticateToken(req: any, res: any, next: any) {
     let token = req.headers.authorization && req.headers.authorization.split(' ')[1];
-    
+
     // 如果Header中没有token，尝试从query参数获取 (用于SSE等不支持Header的场景)
     if (!token && req.query.token) {
         token = req.query.token;
     }
 
     if (!token) return res.status(401).json({ error: 'Access token required' });
-    
+
     const decoded = verifyJwt(token);
     if (!decoded) return res.status(403).json({ error: 'Invalid or expired token' });
-    
+
     // 先从缓存获取
     let user = userCache.get(decoded.sub);
-    
+
     // 缓存未命中，从数据库加载
     if (!user) {
         user = await dbService.getUserById(decoded.sub) || undefined;
@@ -231,9 +232,9 @@ async function authenticateToken(req: any, res: any, next: any) {
             userCache.set(user.id, user);
         }
     }
-    
+
     if (!user) return res.status(404).json({ error: 'User not found' });
-    
+
     req.user = user;
     next();
 }
@@ -259,22 +260,22 @@ app.post('/register', async (req, res) => {
 
         const passwordHash = await bcrypt.hash(password, 10);
         const id = uuidv4();
-        const user: User = { 
-            id, 
-            email, 
-            name, 
-            passwordHash, 
-            XJTLUPassword: password, 
-            MSbinded: false, 
-            ebridgeBinded: false, 
+        const user: User = {
+            id,
+            email,
+            name,
+            passwordHash: bcrypt.hashSync(password, process.env.BCRYPT_SALT_ROUNDS ? parseInt(process.env.BCRYPT_SALT_ROUNDS) : 10),
+            MSbinded: false,
+            ebridgeBinded: false,
             timetableUrl: '',
             timetableFetchLevel: 0,
-            mailReadingSpan: 30,
+            mailReadingSpan: Number(process.env.EMAIL_READ_LIMIT) || 30,
             conflictBoundaryInclusive: false,
+            isConflictScheduleAllowed: true,
             tasks: [{
                 id: uuidv4(),
                 name: '测试任务',
-                description: '用户注册后自动创建的测试任务',
+                description: '恭喜你成功注册时锚平台~新的任务会推送到这里哦',
                 dueDate: new Date().toISOString(),
                 startTime: new Date().toISOString(),
                 endTime: new Date().toISOString(),
@@ -286,7 +287,7 @@ app.post('/register', async (req, res) => {
 
         const token = signJwt({ sub: id, email });
         user.JWTtoken = token;
-        
+
         // 保存到数据库
         await dbService.addUser(user);
         // 更新缓存
@@ -309,11 +310,11 @@ app.post('/updateEbridgePassword', async (req, res) => {
 
         const ok = await bcrypt.compare(password, user.passwordHash);
         if (!ok) return res.status(401).json({ error: 'invalid credentials' });
-        
+
         user.XJTLUaccount = XJTLUaccount;
         user.XJTLUPassword = ebPassword;
         user.ebridgeBinded = true;
-        
+
         // 更新数据库和缓存
         await dbService.updateUser(user);
         userCache.set(user.id, user);
@@ -340,7 +341,7 @@ app.post('/login', async (req, res) => {
 
         const token = signJwt({ sub: user.id, email: user.email });
         user.JWTtoken = token;
-        
+
         // 更新数据库和缓存
         await dbService.updateUser(user);
         userCache.set(user.id, user);
@@ -388,7 +389,7 @@ app.get('/redirect', async (req, res) => {
     try {
         const response = await pca.acquireTokenByCode(tokenRequest);
         logger.info("Access token acquired:", response.accessToken);
-        
+
         // 先尝试从 state 中还原我们的 JWT（如果有的话），然后把 MS 令牌配对到全局用户池
         let providedJwt: string | undefined;
         if (req.query.state) {
@@ -458,7 +459,7 @@ async function startServer() {
     try {
         // 初始化数据库
         await dbService.initialize();
-        
+
         // 设置日志监听器
         dbService.setLogListener(broadcastUserLog);
 
@@ -467,9 +468,9 @@ async function startServer() {
         users.forEach(user => {
             userCache.set(user.id, user);
         });
-        
+
         logger.info(`Loaded ${users.length} users from database`);
-        
+
         // 启动服务器并初始化 WebSocket
         const server = app.listen(PORT, () => {
             logger.info(`Server running on http://localhost:${PORT}`);
@@ -490,7 +491,7 @@ startIntervals(() => userCache.values());
 export async function createTaskToUser(user: User, taskData: Task): Promise<void> {
     // 实现创建任务的逻辑
     try {
-        await dbService.addTask(user.id, taskData);
+        await dbService.addTask(user.id, taskData, !!user.conflictBoundaryInclusive, user.isConflictScheduleAllowed);
         await dbService.refreshUserTasksIncremental(user, { addedIds: [taskData.id] });
         await logUserEvent(user.id, 'taskCreated', `Created task ${taskData.name} via helper`, { id: taskData.id });
         logger.success(`Task created successfully for user ${user.id}: ${taskData.name}`);

@@ -169,7 +169,7 @@ export const mcpTools: MCPToolsMap = {
                     // If recurrenceRule provided, attach serialized rule to parent task
                     if (resolvedRecurrenceRule) newTask.recurrenceRule = JSON.stringify(resolvedRecurrenceRule);
 
-                    await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive, true);
+                    await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive, user.isConflictScheduleAllowed);
                     await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
                     broadcastTaskChange('created', newTask as Task, user.id);
 
@@ -210,7 +210,7 @@ export const mcpTools: MCPToolsMap = {
                                     await logUserEvent(user.id, 'taskCreated', `Created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
                                 }
 
-                                await dbService.addTask(user.id, inst, !!user.conflictBoundaryInclusive, true);
+                                await dbService.addTask(user.id, inst, !!user.conflictBoundaryInclusive, user.isConflictScheduleAllowed);
                                 createdChildren++;
                                 createdIds.push(inst.id);
                                 broadcastTaskChange('created', inst as Task, user.id);
@@ -348,7 +348,7 @@ export const mcpTools: MCPToolsMap = {
     },
     get_server_time: {
         name: "get_server_time",
-        description: "Get the current server time",
+        description: "Get the current server time. IMPORTANT:You MUST use this tool to get the current time before scheduling any time related tasks to ensure accurate time references IF there are no time source in the context.",
         schema: {},
         execute: async (args: any, user: User) => {
             return { content: [{ type: "text" as const, text: new Date().toISOString() }] };

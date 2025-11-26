@@ -26,6 +26,8 @@ import {
     MessageBody,
     NotificationEvent,
     Importance,
+    ConflictResolutionMode,
+    StringList,
 } from 'ews-javascript-api';
 import { ExchangeConfig, IEmail, IEvent } from './types';
 import { logger } from '../Utils/logger.js';
@@ -380,7 +382,7 @@ export class ExchangeClient {
             }
            
             // 接入OpenAI API
-            const apiResponse = await this.callDeepSeekAPI(email);
+            const apiResponse = await this.callLLMAPI(email);
             
             // 触发后续处理逻辑
             await this.handleProcessedData(apiResponse, email);
@@ -435,8 +437,7 @@ export class ExchangeClient {
     }
     
     // 接入OpenAI API
-    private async callDeepSeekAPI(email: IEmail): Promise<any> {
-        // 这里应该是调用DeepSeek API兼容Openai API
+    private async callLLMAPI(email: IEmail): Promise<any> {
         if (!this.llmApi) {
             throw new Error('LLM API 客户端未初始化');
         }
@@ -466,6 +467,14 @@ export class ExchangeClient {
                 logger.warn(`未知的工具调用: ${functionName}`);
             }
         }
+
+        //增加“AI已读”标记
+        try {
+            await this.markSystem.addAIReadTagToEmail(email.id);
+            logger.success(`已将邮件标记为AI已读: ${email.subject}`);
+        } catch (err: any) {
+            logger.error(`标记邮件为AI已读失败: ${err.message || '未知错误'}`);
+        }
         
         // 分析邮件重要性
         // if (this.llmApi) {
@@ -491,7 +500,7 @@ export class ExchangeClient {
 
         // 清理邮件正文内容
         const cleanedEmailBody = this.cleanHtmlContent(email.body || '');
-        const description = safeArgs.description ? `${safeArgs.description}\n\n来自邮件: ${email.subject}\n\n${cleanedEmailBody}` : `来自邮件: ${email.subject}\n\n${cleanedEmailBody}`;
+        const description = `来自邮件: ${email.subject}`;
 
         const toolArgs = {
             ...safeArgs,
@@ -860,4 +869,84 @@ export class ExchangeClient {
             isReminderOn: isReminderOn
         };
     }
+
+    /* 修改指定邮件为已读状态 
+    @param itemId - 邮件 ID
+    @param state - 是否标记为已读
+    */
+
+    public markSystem = {
+    markEmailAsRead : async (itemId: string, state: boolean): Promise<void> => {
+        await this.ensureAutodiscover();
+        logger.exchange(`正在将邮件 ID 为 ${itemId} 标记为已读...`);
+        const email = await EmailMessage.Bind(this.service, new ItemId(itemId));
+        email.IsRead = state;
+        await email.Update(ConflictResolutionMode.AlwaysOverwrite);
+        logger.success(`邮件 ID 为 ${itemId} 已标记为已读。`);
+    },
+
+    /* 为指定邮件增加“AI已读”标签
+    @param itemId - 邮件 ID
+    */
+    addAIReadTagToEmail: async (itemId: string): Promise<void> => {
+        await this.ensureAutodiscover();
+        logger.exchange(`正在为邮件 ID 为 ${itemId} 增加“AI已读”标签...`);
+        const email = await EmailMessage.Bind(this.service, new ItemId(itemId));
+        const aiReadCategory = 'AI已读';
+        if (!email.Categories) {
+            // 使用 ews-javascript-api 的 StringList 而不是普通数组
+            email.Categories = new StringList();
+        }
+        // StringList 并不完全等同于原生数组，使用 any 以便复用 includes/push 语义
+        const categoriesAny = email.Categories as any;
+        if (!categoriesAny.includes || !categoriesAny.push) {
+            // 兼容没有 includes/push 的 StringList：检查 Items 属性或 Count
+            const items = categoriesAny.Items || [];
+            if (!items.includes(aiReadCategory)) {
+                items.push(aiReadCategory);
+                if (categoriesAny.Items) {
+                    categoriesAny.Items = items;
+                }
+                await email.Update(ConflictResolutionMode.AlwaysOverwrite);
+                logger.success(`邮件 ID 为 ${itemId} 已增加“AI已读”标签。`);
+            } else {
+                logger.exchange(`邮件 ID 为 ${itemId} 已包含“AI已读”标签，无需重复添加。`);
+            }
+        } else {
+            if (!categoriesAny.includes(aiReadCategory)) {
+                categoriesAny.push(aiReadCategory);
+                await email.Update(ConflictResolutionMode.AlwaysOverwrite);
+                logger.success(`邮件 ID 为 ${itemId} 已增加“AI已读”标签。`);
+            } else {
+                logger.exchange(`邮件 ID 为 ${itemId} 已包含“AI已读”标签，无需重复添加。`);
+            }
+        }
+    },
+
+    /*判断指定邮件是否已被标记为“AI已读”
+    @param itemId - 邮件 ID
+    @returns 是否已标记为“AI已读”
+    */
+    isEmailMarkedAsAIRead: async (itemId: string): Promise<boolean> => {
+        await this.ensureAutodiscover();
+        logger.exchange(`正在检查邮件 ID 为 ${itemId} 是否已标记为“AI已读”...`);
+        const email = await EmailMessage.Bind(this.service, new ItemId(itemId));
+        const aiReadCategory = 'AI已读';
+        if (!email.Categories) {
+            return false;
+        }
+
+        const categoriesAny = email.Categories as any;
+        if (!categoriesAny.includes) {
+            const items = categoriesAny.Items || [];
+            return items.includes(aiReadCategory);
+        } else {
+            return categoriesAny.includes(aiReadCategory);
+        }
+    }
+    }
+
+
+
+
 }

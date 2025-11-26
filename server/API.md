@@ -415,15 +415,6 @@ RecurrenceSummary（创建/批量创建响应中）:
 查询与过滤：支持 `q`（名称/描述模糊），`completed`（true|false），时间窗口与分页排序：
 `start`、`end`、`limit`、`offset` 或 `page`、`sortBy`（startTime|dueDate|name）、`order`（asc|desc）。
 
-注意（时间比较行为）：
-- `start` 和 `end` 查询参数可以传入 ISO 8601 字符串（例如 `2025-11-26T00:00:00Z`）或可被 `new Date(...)` 解析的时间字符串。服务端在比较任务时间时使用数值时间（Unix epoch seconds），因此即使数据库中存在不同的 ISO 字符串格式（带 `Z` 或带时区偏移 `+08:00`），也能正确比较与排序。
-- 返回的任务对象中，时间字段仍为 ISO 字符串（`startTime`/`endTime`/`dueDate`），但内部查询与排序基于数值时间（保证跨时区与格式一致性）。
-
-示例：获取本地当天所有任务（按数值时间比较）：
-```
-GET /api/tasks?start=2025-11-26T00:00:00Z&end=2025-11-26T23:59:59Z&limit=500
-```
-
 ### GET /api/tasks/parents
 - 描述：返回当前用户的所有父级日程（即在数据库中包含 `recurrenceRule` 的根任务），以及每个父任务的子实例（occurrences）列表，便于前端显示或批量管理父任务。
 - 请求头：`Authorization: Bearer <JWT>`
