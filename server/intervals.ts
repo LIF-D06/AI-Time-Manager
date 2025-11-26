@@ -170,7 +170,13 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
 
             for (const task of user.tasks) {
                 if (!task.pushedToMSTodo) {
+                    // Skip MS Graph actions if user has no token or has been paused due to previous 401
                     if (!user.MStoken) continue;
+                    if (!user.MStoken) continue;
+                    if (!user.MSbinded) {
+                        // User marked unbound - skip pushing
+                        continue;
+                    }
                     const msToken = user.MStoken;
                     const graphEndpoint = `https://graph.microsoft.com/v1.0/me/todo/lists`;
                     const headers = { Authorization: `Bearer ${msToken}`, 'Content-Type': 'application/json' };
@@ -205,6 +211,17 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
                     } catch (error: any) {
                         if (error.response?.status === 401) {
                             logger.error(`MS Graph API 401 Unauthorized for task ${task.id}: Token may be expired or invalid`);
+                            // Pause further MS Graph attempts for this user until token refresh
+                            try {
+                                // Token invalid: clear token and mark as unbound to pause further attempts
+                                user.MStoken = '';
+                                user.MSbinded = false;
+                                await dbService.updateUser(user);
+                                await logUserEvent(user.id, 'msGraphPaused', 'Cleared MS token and paused MS Graph operations due to 401 Unauthorized');
+                                logger.warn(`Cleared MStoken and set MSbinded=false for user ${user.id} until token is refreshed.`);
+                            } catch (e) {
+                                logger.error('Failed to persist MSbinded paused state:', e);
+                            }
                         } else if (error.response?.status === 403) {
                             logger.error(`MS Graph API 403 Forbidden for task ${task.id}: Insufficient permissions`);
                         } else if (error.response?.status) {

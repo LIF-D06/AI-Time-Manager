@@ -8,6 +8,7 @@ import Dashboard from './components/Dashboard';
 import { Modal } from './components/ui/Modal';
 import { Button } from './components/ui/Button';
 import './App.css';
+import ScheduleQueueNotifier from './components/ScheduleQueueNotifier';
 
 function App() {
   const [isAuth, setIsAuth] = useState<boolean>(isAuthenticated());
@@ -43,6 +44,7 @@ function App() {
     <Router>
       <WeekProvider>
       <div className="app-container">
+        <ScheduleQueueNotifier />
         <Routes>
           <Route 
             path="/login" 
@@ -72,6 +74,10 @@ function App() {
           <Route 
             path="/schedule/search" 
             element={isAuth ? <Dashboard onLogout={handleLogout} view="search-schedule" /> : <Navigate to="/login" />} 
+          />
+          <Route 
+            path="/schedule/queue" 
+            element={isAuth ? <Dashboard onLogout={handleLogout} view="queue" /> : <Navigate to="/login" />} 
           />
           <Route 
             path="/chat" 

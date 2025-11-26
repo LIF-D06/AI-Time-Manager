@@ -386,6 +386,71 @@ export const getTasks = async (params: { start?: string; end?: string; limit?: n
   return await response.json();
 };
 
+export const approveQueueItem = async (queueId: string): Promise<any> => {
+  const token = getToken();
+  if (!token) throw new Error('用户未登录');
+
+  const response = await customFetch(`/api/schedule-queue/${encodeURIComponent(queueId)}/approve`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || '批准请求失败');
+  }
+
+  return response.json();
+};
+
+export const rejectQueueItem = async (queueId: string): Promise<any> => {
+  const token = getToken();
+  if (!token) throw new Error('用户未登录');
+
+  const response = await customFetch(`/api/schedule-queue/${encodeURIComponent(queueId)}/reject`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || '拒绝请求失败');
+  }
+
+  return response.json();
+};
+
+export interface ScheduleQueueItem {
+  id: string;
+  userId: string;
+  rawRequest: string;
+  status: string;
+  createdAt: string;
+}
+
+export const getScheduleQueue = async (): Promise<{ queue: ScheduleQueueItem[] }> => {
+  const token = getToken();
+  if (!token) throw new Error('用户未登录');
+
+  const response = await customFetch(`/api/schedule-queue`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || '获取队列失败');
+  }
+
+  return response.json();
+};
+
 export const deleteTask = async (taskId: string, cascade: boolean = false): Promise<void> => {
   const token = getToken();
   if (!token) throw new Error('用户未登录');

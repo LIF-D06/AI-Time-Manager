@@ -44,30 +44,42 @@ const ToolMessage: React.FC<{ content: string; name: string }> = ({ content, nam
 };
 
 const AIChat: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: `我可以帮你做以下几类事情：
+  const STORAGE_KEY = 'mcp_chat_history';
 
-## 📧 邮件管理
-- 查看最近的邮件内容
+  const defaultWelcome: ChatMessage = { role: 'assistant', content: '我可以帮你管理邮件、日程、任务和时间查询。你想让我帮你做什么？' };
 
-## 📅 日程管理
-- 添加新的日程/任务
-- 查看特定时间范围内的日程安排
-- 更新现有的日程信息
-- 删除不需要的日程
-- 标记任务完成状态
+  const [messages, setMessages] = useState<ChatMessage[]>([defaultWelcome]);
 
-## ⏰ 时间相关
-- 获取当前服务器时间
+  // Load saved messages from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as ChatMessage[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load MCP chat history:', e);
+    }
+  }, []);
 
-具体来说，我可以：
-- 从邮件中提取会议、任务信息并自动添加到日程
-- 帮你整理一周或一个月的日程安排
-- 设置提醒和任务优先级
-- 管理会议、待办事项等不同类型的日程
+  // Persist messages to localStorage when they change
+  useEffect(() => {
+    // Skip saving on the very first render to avoid overwriting existing storage
+    if ((isInitialMount as any).current === true) {
+      (isInitialMount as any).current = false;
+      return;
+    }
 
-你想让我帮你处理什么具体的事情呢？比如查看今天的日程，或者从邮件中提取重要信息添加到日历中？` }
-  ]);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+      // console.debug('Saved MCP chat history', messages.length);
+    } catch (e) {
+      console.warn('Failed to save MCP chat history:', e);
+    }
+  }, [messages]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -81,6 +93,7 @@ const AIChat: React.FC = () => {
 
   const mcpClientRef = useRef<SimpleMcpClient | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isInitialMount = useRef(true);
 
   useEffect(() => {
     const token = getToken();
@@ -116,6 +129,15 @@ const AIChat: React.FC = () => {
     localStorage.setItem('llm_apiKey', config.apiKey);
     localStorage.setItem('llm_model', config.model);
     setShowSettings(false);
+  };
+
+  const clearHistory = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      console.warn('Failed to clear MCP chat history:', e);
+    }
+    setMessages([defaultWelcome]);
   };
 
   const handleSend = async () => {
@@ -206,13 +228,22 @@ const AIChat: React.FC = () => {
             {mcpConnected ? 'MCP 已连接' : 'MCP 未连接'}
           </Badge>
         </CardTitle>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => setShowSettings(!showSettings)}
-        >
-          <Settings size={18} style={{ marginRight: '6px' }} /> 设置
-        </Button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setShowSettings(!showSettings)}
+          >
+            <Settings size={18} style={{ marginRight: '6px' }} /> 设置
+          </Button>
+          <Button 
+            variant="outline"
+            size="sm"
+            onClick={clearHistory}
+          >
+            清除历史
+          </Button>
+        </div>
       </CardHeader>
 
       {showSettings && (

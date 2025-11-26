@@ -64,9 +64,10 @@ export class ExchangeClient {
         
         // 初始化 LLM API 客户端
         if (config.openaiApiKey) {
-            this.llmApi = new LLMApi(config.openaiApiKey, config.openaiModel || 'gpt-4o');
+            this.llmApi = new LLMApi(config.openaiApiKey, config.openaiModel || 'gpt-4o') as LLMApi;
         } else {
             logger.warn('未提供 OpenAI API Key，无法使用邮件智能处理功能');
+
         }
 
         // 根据是否存在 domain 来决定用户名的格式
@@ -347,8 +348,21 @@ export class ExchangeClient {
             }
             
             // 使用createTodoItem将日历事件添加到MS Todo
-            await createTodoItem(taskData, this.user.MStoken);
-            logger.success(`已成功将日历事件添加到MS Todo: ${taskData.name}`);
+            try {
+                await createTodoItem(taskData, this.user.MStoken);
+                logger.success(`已成功将日历事件添加到MS Todo: ${taskData.name}`);
+            } catch (err: any) {
+                // 如果是 401，则暂停该用户的 MS Graph 操作，直到前端刷新 token
+                if (err.response?.status === 401) {
+                    if (this.user) {
+                        this.user.MStoken = '';
+                        this.user.MSbinded = false;
+                        try { await (await import('./dbService')).dbService.updateUser(this.user); } catch {}
+                        logger.error(`MS Graph 401 detected; cleared MStoken and set MSbinded=false for user ${this.user.id}`);
+                    }
+                }
+                throw err;
+            }
             
         } catch (error: any) {
             logger.error(`处理日历事件时出错: ${error.message || '未知错误'}`);
@@ -422,7 +436,7 @@ export class ExchangeClient {
     
     // 接入OpenAI API
     private async callDeepSeekAPI(email: IEmail): Promise<any> {
-        // 这里应该是调用DeepSeek API的实现，但根据需求我们使用OpenAI API
+        // 这里应该是调用DeepSeek API兼容Openai API
         if (!this.llmApi) {
             throw new Error('LLM API 客户端未初始化');
         }
@@ -484,17 +498,14 @@ export class ExchangeClient {
             description
         };
 
-        // 调用 MCP 工具创建任务 (DB)
-        // 注意：mcpTools.add_schedule.execute 会处理默认时间和验证
-        const result = await mcpTools.add_schedule.execute(toolArgs, this.user);
-
-        if ((result as any).task) {
-            const task = (result as any).task as Task;
-            logger.success(`已自动创建任务 (DB): ${task.name}`);
-            // mcpTools.add_schedule.execute 已经处理了 Exchange 同步，这里不需要再次调用 createEvent
-        } else {
-            const errorText = result.content && result.content[0] ? result.content[0].text : '未知错误';
-            logger.error(`创建任务失败 (DB): ${errorText}`);
+        // 自动化（LLM）处理邮件时，日程请求入队，不直接入库
+        try {
+            const dbService = (await import('./dbService')).dbService;
+            const rawRequest = JSON.stringify({ args: toolArgs, email });
+            await dbService.addScheduleToQueue(this.user.id, rawRequest);
+            logger.success(`已将日程请求加入队列，待用户确认: ${toolArgs.name}`);
+        } catch (err : any) {
+            logger.error(`日程队列入库失败: ${err.message || '未知错误'}`);
         }
     }
 

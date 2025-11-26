@@ -20,6 +20,7 @@ import { Modal } from './ui/Modal';
 import AllSchedule from './Schedule/AllSchedule';
 import TodaySchedule from './Schedule/TodaySchedule';
 import SearchTasks from './Schedule/SearchTasks';
+import ScheduleQueue from './Schedule/ScheduleQueue';
 import LogViewer from './Logs/LogViewer';
 import AIChat from './AIChat/AIChat';
 import { useWeek } from '../context/WeekContext';
@@ -380,6 +381,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
     if (view === 'all-schedule') return <AllSchedule />;
     if (view === 'today-schedule') return <TodaySchedule />;
     if (view === 'search-schedule') return <SearchTasks />;
+    if (view === 'queue') return <ScheduleQueue />;
     if (view === 'logs') return <LogViewer />;
     if (view === 'chat') return <AIChat />;
     
@@ -501,6 +503,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout, view }) => {
         onClick={() => handleNavClick('/schedule/search')}
       >
         <Search size={20} /> <span className="nav-text">搜索任务</span>
+      </button>
+      <button 
+        className={`nav-item ${view === 'queue' ? 'active' : ''}`}
+        onClick={() => handleNavClick('/schedule/queue')}
+      >
+        <Check size={20} /> <span className="nav-text">待审批日程</span>
       </button>
       <button 
         className={`nav-item ${view === 'chat' ? 'active' : ''}`}

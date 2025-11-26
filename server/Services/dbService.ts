@@ -6,6 +6,7 @@ import { logger } from '../Utils/logger.js';
 import { assertNoConflict } from './scheduleConflict';
 
 class DatabaseService {
+
     private db: Database | null = null;
     private onLogAdded: ((userId: string, log: any) => void) | null = null;
 
@@ -44,6 +45,18 @@ class DatabaseService {
                     timetableFetchLevel INTEGER DEFAULT 0,
                     mailReadingSpan INTEGER DEFAULT 30,
                     conflictBoundaryInclusive BOOLEAN DEFAULT 0,
+                    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+            `);
+
+            // 创建日程队列表
+            await this.db.exec(`
+                CREATE TABLE IF NOT EXISTS schedule_queue (
+                    id TEXT PRIMARY KEY,
+                    userId TEXT NOT NULL,
+                    rawRequest TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
                     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
@@ -625,6 +638,44 @@ class DatabaseService {
             emsClient: undefined // 运行时生成，不持久化
         };
     }
+                /**
+             * 查询指定用户的日程队列
+             */
+            async getScheduleQueueByUser(userId: string) {
+                if (!this.db) throw new Error('DB not initialized');
+                const rows = await this.db.all(`SELECT * FROM schedule_queue WHERE userId = ? ORDER BY createdAt DESC`, [userId]);
+                return rows;
+            }
+
+            async getScheduleQueueById(id: string) {
+                if (!this.db) throw new Error('DB not initialized');
+                const row: any = await this.db.get(`SELECT * FROM schedule_queue WHERE id = ?`, [id]);
+                return row;
+            }
+
+            async updateScheduleQueueStatus(id: string, status: string) {
+                if (!this.db) throw new Error('DB not initialized');
+                await this.db.run(`UPDATE schedule_queue SET status = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`, [status, id]);
+            }
+
+            async deleteScheduleQueueItem(id: string) {
+                if (!this.db) throw new Error('DB not initialized');
+                await this.db.run(`DELETE FROM schedule_queue WHERE id = ?`, [id]);
+            }
+        /**
+         * 将日程请求加入队列
+         * @param userId 用户ID
+         * @param rawRequest 原始请求内容（JSON字符串）
+         */
+        async addScheduleToQueue(userId: string, rawRequest: string) {
+            if (!this.db) throw new Error('DB not initialized');
+            const id = uuidv4();
+            await this.db.run(`
+                INSERT INTO schedule_queue (id, userId, rawRequest, status, createdAt, updatedAt)
+                VALUES (?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            `, [id, userId, rawRequest]);
+            return id;
+        }
     
     async close() {
         if (this.db) {

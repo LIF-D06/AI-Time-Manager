@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import Configuration from 'openai';
 import { IEmail } from './types';
 import { getOpenAITools } from './mcp';
+import { MCPToolNames, type MCPToolNameTypes } from '../Services/mcpTypes.js';
 
 // 定义邮件处理请求和响应接口
 export interface EmailProcessRequest {
@@ -52,7 +53,19 @@ export class LLMApi {
             const mcpTools = getOpenAITools();
             // Only use add_schedule from MCP tools for email processing
             const tools = [
-                ...mcpTools.filter(t => t.function.name === 'add_schedule'),
+                ...mcpTools.filter(t => {
+                    switch(t.function.name) {
+                        case MCPToolNames.AddSchedule:
+                        // case MCPToolNames.UpdateSchedule:
+                        // case MCPToolNames.GetSchedule:
+                        // case MCPToolNames.GetServerTime:
+                        // case MCPToolNames.SearchTasks:
+                        // case MCPToolNames.ReadEmails:
+                            return true;
+                        default:
+                            return false;
+                    }
+                }),
                 {
                     type: "function",
                     function: {
@@ -82,7 +95,7 @@ export class LLMApi {
                     role: 'system',
                         content: `你是一个从邮件中提取日程信息专业的邮件分析助手。现在是 ${new Date().toISOString()}。
 请分析邮件内容，并调用适当的工具来处理。
-- 如果邮件包含会议、待办事项、截止日期或任何需要安排时间的内容，请调用 'add_schedule'。
+- 如果邮件包含会议、待办事项、截止日期或任何需要安排时间的内容，请先使用工具获得必要的信息，然后调用 'add_schedule'。
 - 你必须从邮件中提取任务名称(name)、开始时间(startTime)和结束时间(endTime)。
 - 如果邮件中只提到截止日期(Due date)，请将开始时间和结束时间设置为同一时间。
 - 如果邮件仅包含信息通知，不需要采取行动，请调用 'log_info'。

@@ -86,8 +86,8 @@ export interface User {
     passwordHash?: string; // only for local accounts
     JWTtoken?: string; // latest issued JWT for user (optional)
     MStoken?: string; // Microsoft access token (optional)
-    MSbinded: boolean; // 是否绑定了 Microsoft 账号
-    ebridgeBinded: boolean; // 是否绑定了 ebridge 账号
+        MSbinded: boolean; // 是否绑定了 Microsoft 账号
+        ebridgeBinded: boolean; // 是否绑定了 ebridge 账号
     weekOffset?: number; // 用户自定义周数偏移量，叠加在全局偏移之上
     tasks: Task[]; // 用户绑定的任务列表
     emsClient?: ExchangeClient; // 用于操作 Exchange 的客户端
@@ -138,7 +138,8 @@ async function pairMsTokenToUser(userId: string, msToken: string) {
     }
     
     u.MStoken = msToken;
-    u.MSbinded = true; // 标记为已绑定
+    u.MSbinded = true; // 标记为已绑定并激活
+    // 新的 token 到来，标记为已绑定
     
     // 更新数据库和缓存
     await dbService.updateUser(u);

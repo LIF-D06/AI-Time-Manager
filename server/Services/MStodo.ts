@@ -42,12 +42,17 @@ export async function createTodoItem(task: Task, token: string): Promise<void> {
     } catch (error: any) {
         if (error.response?.status === 401) {
             logger.error(`MS Graph API 401 Unauthorized for task ${task.id}: Token may be expired or invalid`);
+            // 抛出错误以便上层调用者（例如 ExchangeClient）可以捕获并采取措施（如暂停用户的 MS Graph 操作）
+            throw error;
         } else if (error.response?.status === 403) {
             logger.error(`MS Graph API 403 Forbidden for task ${task.id}: Insufficient permissions`);
+            throw error;
         } else if (error.response?.status) {
             logger.error(`MS Graph API ${error.response.status} error for task ${task.id}:`, error.response.data || error.message);
+            throw error;
         } else {
             logger.error(`创建待办事项失败: ${error.message || '未知错误'}`);
+            throw error;
         }
         // 不抛出错误，避免影响主流程
     }

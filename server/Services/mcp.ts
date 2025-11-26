@@ -13,11 +13,12 @@ import { findConflictingTasks, TimeLikeTask } from './scheduleConflict';
 import { logUserEvent } from './userLog';
 import { generateRecurrenceInstances, buildRecurrenceSummary } from './recurrence';
 import { broadcastTaskChange } from './websocket';
+import type { MCPToolsMap, MCPToolDefinition, AddScheduleArgs, AddScheduleResult, ReadEmailsArgs, ReadEmailsResult } from './mcpTypes';
 
 // Store active transports: sessionId -> Transport
 const transports = new Map<string, SSEServerTransport>();
 
-export const mcpTools = {
+export const mcpTools: MCPToolsMap = {
     read_emails: {
         name: "read_emails",
         description: "Read recent emails from the user's inbox",
@@ -162,97 +163,113 @@ export const mcpTools = {
                 importance: importance || 'normal',
                 isReminderOn: isReminderOn
             };
-            try {
-                // If recurrenceRule provided, attach serialized rule to parent task
-                if (resolvedRecurrenceRule) newTask.recurrenceRule = JSON.stringify(resolvedRecurrenceRule);
+            // If caller explicitly sets _internal_approve, proceed to create directly (used by server APIs)
+            if ((args as any)._internal_approve === true) {
+                try {
+                    // If recurrenceRule provided, attach serialized rule to parent task
+                    if (resolvedRecurrenceRule) newTask.recurrenceRule = JSON.stringify(resolvedRecurrenceRule);
 
-                await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive, true);
-                await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
-                broadcastTaskChange('created', newTask as Task, user.id);
+                    await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive, true);
+                    await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
+                    broadcastTaskChange('created', newTask as Task, user.id);
 
-                // Sync to Exchange Calendar if emsClient is available (parent only)
-                if (user.emsClient) {
-                    const eventData: IEvent = {
-                        subject: newTask.name,
-                        body: newTask.description,
-                        start: newTask.startTime,
-                        end: newTask.endTime,
-                        location: newTask.location || '',
-                        attendees: [],
-                        importance: newTask.importance,
-                        isReminderOn: newTask.isReminderOn
-                    };
-                    try {
-                        await user.emsClient.createEvent(eventData);
-                        logger.success(`Task synced to Exchange Calendar: ${newTask.name}`);
-                    } catch (exchangeError: any) {
-                        logger.error(`Failed to sync task to Exchange Calendar: ${exchangeError.message}`);
-                    }
-                }
-
-                // If recurrence rule is present, generate instances and insert them
-                if (resolvedRecurrenceRule) {
-                    const generated = generateRecurrenceInstances(newTask as Task, resolvedRecurrenceRule as RecurrenceRule);
-                    const createdIds: string[] = [newTask.id];
-                    const instanceConflicts: any[] = [];
-                    let createdChildren = 0, errorChildren = 0;
-
-                    for (const inst of generated) {
+                    // Sync to Exchange Calendar if emsClient is available (parent only)
+                    if (user.emsClient) {
+                        const eventData: IEvent = {
+                            subject: newTask.name,
+                            body: newTask.description,
+                            start: newTask.startTime,
+                            end: newTask.endTime,
+                            location: newTask.location || '',
+                            attendees: [],
+                            importance: newTask.importance,
+                            isReminderOn: newTask.isReminderOn
+                        };
                         try {
-                            const instConf = findConflictingTasks(user.tasks || [], inst, { boundaryConflict: !!user.conflictBoundaryInclusive });
-                            if (instConf.length > 0) {
-                                instanceConflicts.push({ instance: { id: inst.id, startTime: inst.startTime, endTime: inst.endTime }, conflicts: instConf.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })) });
-                                await logUserEvent(user.id, 'taskConflict', `Created recurrence instance with conflict ${inst.name}`, { parentId: newTask.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
-                            } else {
-                                await logUserEvent(user.id, 'taskCreated', `Created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
-                            }
-
-                            await dbService.addTask(user.id, inst, !!user.conflictBoundaryInclusive, true);
-                            createdChildren++;
-                            createdIds.push(inst.id);
-                            broadcastTaskChange('created', inst as Task, user.id);
-
-                            // Sync instance to Exchange as separate event if desired
-                            if (user.emsClient) {
-                                const ev: IEvent = {
-                                    subject: inst.name,
-                                    body: inst.description,
-                                    start: inst.startTime,
-                                    end: inst.endTime,
-                                    location: inst.location || '',
-                                    attendees: [],
-                                    importance: inst.importance,
-                                    isReminderOn: inst.isReminderOn
-                                };
-                                try { await user.emsClient.createEvent(ev); } catch (e) { /* ignore */ }
-                            }
-                        } catch (e: any) {
-                            errorChildren++;
-                            await logUserEvent(user.id, 'taskError', `Error creating recurrence instance for ${newTask.name}`, { parentId: newTask.id, error: e?.message });
+                            await user.emsClient.createEvent(eventData);
+                            logger.success(`Task synced to Exchange Calendar: ${newTask.name}`);
+                        } catch (exchangeError: any) {
+                            logger.error(`Failed to sync task to Exchange Calendar: ${exchangeError.message}`);
                         }
                     }
 
-                    // Refresh cache with all created ids
-                    await dbService.refreshUserTasksIncremental(user, { addedIds: createdIds });
+                    // If recurrence rule is present, generate instances and insert them
+                    if (resolvedRecurrenceRule) {
+                        const generated = generateRecurrenceInstances(newTask as Task, resolvedRecurrenceRule as RecurrenceRule);
+                        const createdIds: string[] = [newTask.id];
+                        const instanceConflicts: any[] = [];
+                        let createdChildren = 0, errorChildren = 0;
 
-                    return {
-                        content: [{ type: "text" as const, text: `Task created successfully. ID: ${newTask.id}. Instances created: ${createdChildren}` }],
-                        task: newTask,
-                        recurrenceSummary: buildRecurrenceSummary(resolvedRecurrenceRule as RecurrenceRule, createdChildren, 0, errorChildren),
-                        conflictWarning: (parentConflicts.length > 0 || instanceConflicts.length > 0) ? {
-                            message: 'Task created with time conflicts',
-                            conflicts: parentConflicts.map((c: any) => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })),
-                            instanceConflicts
-                        } : undefined
+                        for (const inst of generated) {
+                            try {
+                                const instConf = findConflictingTasks(user.tasks || [], inst, { boundaryConflict: !!user.conflictBoundaryInclusive });
+                                if (instConf.length > 0) {
+                                    instanceConflicts.push({ instance: { id: inst.id, startTime: inst.startTime, endTime: inst.endTime }, conflicts: instConf.map(c => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })) });
+                                    await logUserEvent(user.id, 'taskConflict', `Created recurrence instance with conflict ${inst.name}`, { parentId: newTask.id, instanceStart: inst.startTime, instanceEnd: inst.endTime });
+                                } else {
+                                    await logUserEvent(user.id, 'taskCreated', `Created recurrence instance ${inst.name}`, { id: inst.id, parentTaskId: inst.parentTaskId, startTime: inst.startTime, endTime: inst.endTime });
+                                }
+
+                                await dbService.addTask(user.id, inst, !!user.conflictBoundaryInclusive, true);
+                                createdChildren++;
+                                createdIds.push(inst.id);
+                                broadcastTaskChange('created', inst as Task, user.id);
+
+                                // Sync instance to Exchange as separate event if desired
+                                if (user.emsClient) {
+                                    const ev: IEvent = {
+                                        subject: inst.name,
+                                        body: inst.description,
+                                        start: inst.startTime,
+                                        end: inst.endTime,
+                                        location: inst.location || '',
+                                        attendees: [],
+                                        importance: inst.importance,
+                                        isReminderOn: inst.isReminderOn
+                                    };
+                                    try { await user.emsClient.createEvent(ev); } catch (e) { /* ignore */ }
+                                }
+                            } catch (e: any) {
+                                errorChildren++;
+                                await logUserEvent(user.id, 'taskError', `Error creating recurrence instance for ${newTask.name}`, { parentId: newTask.id, error: e?.message });
+                            }
+                        }
+
+                        // Refresh cache with all created ids
+                        await dbService.refreshUserTasksIncremental(user, { addedIds: createdIds });
+
+                        return {
+                            content: [{ type: "text" as const, text: `Task created successfully. ID: ${newTask.id}. Instances created: ${createdChildren}` }],
+                            task: newTask,
+                            recurrenceSummary: buildRecurrenceSummary(resolvedRecurrenceRule as RecurrenceRule, createdChildren, 0, errorChildren),
+                            conflictWarning: (parentConflicts.length > 0 || instanceConflicts.length > 0) ? {
+                                message: 'Task created with time conflicts',
+                                conflicts: parentConflicts.map((c: any) => ({ id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime })),
+                                instanceConflicts
+                            } : undefined
+                        };
+                    }
+
+                    return { 
+                        content: [{ type: "text" as const, text: `Task created successfully. ID: ${newTask.id}` }],
+                        task: newTask 
                     };
+                } catch (error: any) {
+                    return { content: [{ type: "text" as const, text: `Error creating task: ${error.message}` }] };
                 }
+            }
 
-                return { 
-                    content: [{ type: "text" as const, text: `Task created successfully. ID: ${newTask.id}` }],
-                    task: newTask 
-                };
-            } catch (error: any) {
-                return { content: [{ type: "text" as const, text: `Error creating task: ${error.message}` }] };
+            // Otherwise (normal external MCP caller), enqueue request and notify user for approval
+            try {
+                const db = dbService;
+                const rawRequest = JSON.stringify({ args, timestamp: new Date().toISOString() });
+                const queueId = await db.addScheduleToQueue(user.id, rawRequest);
+                // Log user event and broadcast to connected clients
+                await logUserEvent(user.id, 'external_schedule_request', `外部请求创建日程: ${name}`, { queueId, name, startTime, endTime });
+                return { content: [{ type: "text" as const, text: `Request queued for user approval. Queue ID: ${queueId}` }], queued: true, queueId };
+            } catch (err: any) {
+                logger.error('Failed to enqueue external schedule request:', err);
+                return { content: [{ type: "text" as const, text: `Failed to queue request: ${err?.message || err}` }] };
             }
         }
     },
@@ -396,13 +413,13 @@ export function initializeMcpRoutes(app: express.Application, authenticateToken:
         for (const key of Object.keys(mcpTools)) {
             const tool = mcpTools[key as keyof typeof mcpTools];
             server.tool(
-                tool.name,
-                tool.description,
-                tool.schema,
-                async (args: any) => {
-                    return await tool.execute(args, user);
-                }
-            );
+                    tool.name,
+                    tool.description ?? '',
+                    tool.schema ?? {},
+                    async (args: any) => {
+                        return await tool.execute(args, user);
+                    }
+                );
         }
 
         await server.connect(transport);
