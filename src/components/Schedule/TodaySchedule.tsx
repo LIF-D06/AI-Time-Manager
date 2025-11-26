@@ -3,7 +3,8 @@ import { getTasks, type Task, updateTask } from '../../services/api';
 import { useWeek } from '../../context/WeekContext';
 import { format, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Calendar, Clock, MapPin, CheckCircle2, Circle, Plus, RefreshCw } from 'lucide-react';
+import { Calendar, CheckCircle2, Circle, Plus, RefreshCw } from 'lucide-react';
+import ScheduleCard from './ScheduleCard';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Button } from '../ui/Button';
 import AddTaskModal from './AddTaskModal';
@@ -170,12 +171,18 @@ const TodaySchedule: React.FC = () => {
                           </div>
                         )}
                         
-                        <div className="task-card" onClick={() => setSelectedTask(task)} style={{ cursor: 'pointer' }}>
-                          <div className="task-header">
-                            <h3>{task.name}</h3>
-                            {task.completed ? (
-                              <CheckCircle2 
-                                className="icon-completed" 
+                        <ScheduleCard
+                          name={task.name}
+                          description={task.description}
+                          startTime={task.startTime}
+                          endTime={task.endTime}
+                          location={task.location}
+                          status={getStatusColor(task).replace('status-', '') as any}
+                          onClick={() => setSelectedTask(task)}
+                          rightActions={(
+                            task.completed ? (
+                              <CheckCircle2
+                                className="icon-completed"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleOpenCompleteModal(task);
@@ -191,20 +198,9 @@ const TodaySchedule: React.FC = () => {
                                 }}
                                 style={{ cursor: 'pointer' }}
                               />
-                            )}
-                          </div>
-                          {task.description && <p className="task-desc">{task.description}</p>}
-                          <div className="task-meta">
-                            {task.location && (
-                              <span className="meta-item">
-                                <MapPin size={14} /> {task.location}
-                              </span>
-                            )}
-                            <span className="meta-item">
-                              <Clock size={14} /> {format(parseISO(task.startTime), 'HH:mm')} - {format(parseISO(task.endTime), 'HH:mm')}
-                            </span>
-                          </div>
-                        </div>
+                            )
+                          )}
+                        />
                       </div>
                     </div>
                     

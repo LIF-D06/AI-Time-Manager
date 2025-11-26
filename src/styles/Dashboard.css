@@ -456,8 +456,11 @@
 }
 
 .mobile-nav.open {
-  max-height: 400px; /* Adjust based on content height */
+  max-height: calc(100vh - 60px); /* Fill available viewport under header and allow scroll */
   opacity: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0px;
 }
 
 .mobile-nav .nav-item {

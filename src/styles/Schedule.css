@@ -186,6 +186,53 @@
   gap: 8px;
 }
 
+.task-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0; /* prevent actions from growing and pushing title */
+}
+
+@media (max-width: 480px) {
+  .task-actions {
+    /* allow actions to wrap onto next line on very small screens */
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .task-actions .ui-button {
+    padding: 6px 8px;
+    font-size: 0.8rem;
+  }
+
+  .task-header h3 {
+    font-size: 1rem;
+  }
+}
+
+/* Card footer actions (placed at bottom of card) */
+.task-footer {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .task-footer {
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .task-footer .ui-button {
+    padding: 6px 8px;
+    font-size: 0.8rem;
+  }
+}
+
 .task-header h3 {
   margin: 0;
   font-size: 1.1rem;

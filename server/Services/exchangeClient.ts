@@ -501,7 +501,25 @@ export class ExchangeClient {
         // 自动化（LLM）处理邮件时，日程请求入队，不直接入库
         try {
             const dbService = (await import('./dbService')).dbService;
-            const rawRequest = JSON.stringify({ args: toolArgs, email });
+
+            // 构造一个 JSON-safe 的精简 email 对象，避免将可能包含循环引用的复杂对象序列化入库
+            const attachmentsCount = (email.attachments && (email.attachments as any).Count) ??
+                (Array.isArray((email as any).attachments) ? (email as any).attachments.length : 0);
+
+            const safeEmail = {
+                id: email.id,
+                subject: email.subject,
+                from: email.from,
+                receivedAt: email.receivedAt,
+                isRead: email.isRead,
+                body: this.cleanHtmlContent(email.body || ''),
+                hasAttachments: !!email.hasAttachments,
+                attachmentsCount: attachmentsCount
+            };
+
+            const payload = { args: toolArgs, email: safeEmail, _meta: { source: 'exchange', createdAt: new Date().toISOString() } };
+
+            const rawRequest = JSON.stringify(payload);
             await dbService.addScheduleToQueue(this.user.id, rawRequest);
             logger.success(`已将日程请求加入队列，待用户确认: ${toolArgs.name}`);
         } catch (err : any) {

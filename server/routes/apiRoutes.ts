@@ -837,9 +837,16 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       // Call add_schedule with internal approval flag
       const result = await mcpTools.add_schedule.execute({ ...args, _internal_approve: true }, user);
 
-      // Mark queue item as approved
-      await dbService.updateScheduleQueueStatus(id, 'approved');
-      res.json({ result });
+      // Remove queue item (approved) and return latest queue
+      try {
+        await dbService.deleteScheduleQueueItem(id);
+      } catch (e) {
+        logger.warn('Failed to delete schedule queue item after approval, will fallback to marking approved', e);
+        await dbService.updateScheduleQueueStatus(id, 'approved');
+      }
+
+      const queue = await dbService.getScheduleQueueByUser(user.id);
+      res.json({ result, queue });
     } catch (err: any) {
       logger.error('Approving schedule queue item failed:', err);
       res.status(500).json({ error: 'Approve failed' });
@@ -855,9 +862,16 @@ export function initializeApiRoutes(authenticateToken: AuthMiddleware) {
       if (!row) return res.status(404).json({ error: 'Queue item not found' });
       if (row.userId !== user.id) return res.status(403).json({ error: 'Not your queue item' });
 
-      await dbService.updateScheduleQueueStatus(id, 'rejected');
+      // Remove rejected item from queue and return updated queue
+      try {
+        await dbService.deleteScheduleQueueItem(id);
+      } catch (e) {
+        logger.warn('Failed to delete schedule queue item after rejection, will fallback to marking rejected', e);
+        await dbService.updateScheduleQueueStatus(id, 'rejected');
+      }
       await logUserEvent(user.id, 'external_schedule_rejected', `已拒绝外部日程请求`, { queueId: id });
-      res.json({ ok: true });
+      const queue = await dbService.getScheduleQueueByUser(user.id);
+      res.json({ ok: true, queue });
     } catch (err: any) {
       logger.error('Rejecting schedule queue item failed:', err);
       res.status(500).json({ error: 'Reject failed' });

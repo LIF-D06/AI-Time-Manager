@@ -286,7 +286,17 @@ class DatabaseService {
         if (!allowConflict) {
             assertNoConflict(existing, task, { boundaryConflict: boundaryConflict ?? false });
         }
-        
+        // 规范化时间字段为 UTC ISO 字符串，避免不同时区/格式导致的字符串比较错误
+        try {
+            if (task.startTime) task.startTime = new Date(task.startTime).toISOString();
+        } catch (e) {}
+        try {
+            if (task.endTime) task.endTime = new Date(task.endTime).toISOString();
+        } catch (e) {}
+        try {
+            if (task.dueDate) task.dueDate = new Date(task.dueDate).toISOString();
+        } catch (e) {}
+
         await this.db.run(
             `INSERT INTO tasks 
              (id, userId, name, description, dueDate, startTime, endTime, 
@@ -312,6 +322,11 @@ class DatabaseService {
                 assertNoConflict(others, task, { boundaryConflict: boundaryConflict ?? false });
             }
         }
+        // 规范化时间字段为 UTC ISO
+        try { if (task.startTime) task.startTime = new Date(task.startTime).toISOString(); } catch (e) {}
+        try { if (task.endTime) task.endTime = new Date(task.endTime).toISOString(); } catch (e) {}
+        try { if (task.dueDate) task.dueDate = new Date(task.dueDate).toISOString(); } catch (e) {}
+
         await this.db.run(
             `UPDATE tasks 
              SET name = ?, description = ?, dueDate = ?, startTime = ?, endTime = ?, 
@@ -342,6 +357,17 @@ class DatabaseService {
 
         const fields = Object.keys(updates).filter(k => k !== 'id');
         if (fields.length === 0) return existingTask;
+
+        // 规范化时间字段（若在更新中出现）以 UTC ISO 格式写入
+        if (updates.startTime) {
+            try { updates.startTime = new Date(updates.startTime as string).toISOString(); } catch (e) {}
+        }
+        if (updates.endTime) {
+            try { updates.endTime = new Date(updates.endTime as string).toISOString(); } catch (e) {}
+        }
+        if (updates.dueDate) {
+            try { updates.dueDate = new Date(updates.dueDate as string).toISOString(); } catch (e) {}
+        }
 
         const setClauses = fields.map(f => `${f} = ?`).join(', ');
         const values = fields.map(f => {
@@ -401,13 +427,24 @@ class DatabaseService {
         if (!this.db) throw new Error('Database not initialized');
         const where: string[] = ['userId = ?'];
         const params: any[] = [userId];
+        // Use numeric time comparisons (Unix seconds) to avoid issues with mixed ISO formats
         if (opts?.start) {
-            where.push('endTime >= ?');
-            params.push(opts.start);
+            try {
+                const startSec = Math.floor(new Date(opts.start).getTime() / 1000);
+                where.push("strftime('%s', endTime) >= ?");
+                params.push(startSec);
+            } catch (e) {
+                // ignore invalid date
+            }
         }
         if (opts?.end) {
-            where.push('startTime <= ?');
-            params.push(opts.end);
+            try {
+                const endSec = Math.floor(new Date(opts.end).getTime() / 1000);
+                where.push("strftime('%s', startTime) <= ?");
+                params.push(endSec);
+            } catch (e) {
+                // ignore invalid date
+            }
         }
         if (typeof opts?.completed === 'boolean') {
             where.push('completed = ?');
@@ -420,8 +457,13 @@ class DatabaseService {
         }
 
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-        const sortField = ['startTime', 'dueDate', 'name', 'endTime'].includes(opts?.sortBy || '') ? opts!.sortBy : 'startTime';
+        const requestedSort = opts?.sortBy || 'startTime';
+        const allowed = ['startTime', 'dueDate', 'name', 'endTime'];
+        const sortField = allowed.includes(requestedSort) ? requestedSort : 'startTime';
         const order = opts?.order === 'desc' ? 'DESC' : 'ASC';
+        // If sorting by a time field, sort by numeric epoch seconds
+        const timeFields = ['startTime', 'endTime', 'dueDate'];
+        const orderByExpr = timeFields.includes(sortField) ? `strftime('%s', ${sortField})` : sortField;
         const limit = Math.max(1, Math.min(500, opts?.limit || 50));
         const offset = Math.max(0, opts?.offset || 0);
 
@@ -431,7 +473,7 @@ class DatabaseService {
         const total = countRow ? (countRow.cnt || 0) : 0;
 
         // select with ordering and pagination
-        const sql = `SELECT * FROM tasks ${whereSql} ORDER BY ${sortField} ${order} LIMIT ? OFFSET ?`;
+        const sql = `SELECT * FROM tasks ${whereSql} ORDER BY ${orderByExpr} ${order} LIMIT ? OFFSET ?`;
         const finalParams = params.concat([limit, offset]);
         const rows = await this.db.all(sql, finalParams);
         const tasks = rows.map((row: any) => ({
