@@ -51,7 +51,7 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
     // Interval 1: 处理 JWT 过期、Exchange 事件、邮件处理、推送 To Do、课表拉取
     const interval1 = setInterval(async () => {
         for (const user of getUsers()) {
-            logger.info(`Processing user ${user.id},with ebridgeBinded:${user.ebridgeBinded},XJTLUPassword:${user.XJTLUPassword},timetableUrl:${user.timetableUrl}`);
+            logger.debug(`Processing user ${user.id},with ebridgeBinded:${user.ebridgeBinded},XJTLUPassword:${user.XJTLUPassword},timetableUrl:${user.timetableUrl}`);
 
             if (user.JWTtoken) {
                 const decoded = verifyJwt(user.JWTtoken);
@@ -225,7 +225,7 @@ export function startIntervals(getUsers: () => IterableIterator<User>): Interval
                 }
             }
         }
-        logger.info('Checked all users for Ebridge status');
+        logger.debug('Checked all users for Ebridge status');
     }, 20000);
 
     // Interval 2: 后台检查 ebridge 连接并获取 timetableUrl

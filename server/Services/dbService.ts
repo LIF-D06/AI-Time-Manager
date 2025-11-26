@@ -662,6 +662,7 @@ class DatabaseService {
             weekOffset: row.weekOffset || 0,
             tasks: tasks,
             emsClient: undefined // 运行时生成，不持久化
+            
         };
     }
                 /**

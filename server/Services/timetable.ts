@@ -9,43 +9,7 @@ import { logger } from '../Utils/logger.js';
 import { ExchangeClient } from './exchangeClient';
 
 // Local definitions to avoid circular dependency with index.ts
-export interface Task {
-    id: string;
-    name: string;
-    description: string;
-    dueDate: string;
-    startTime: string;
-    endTime: string;
-    location?: string;
-    completed: boolean;
-    pushedToMSTodo: boolean;
-    body?: string;
-    attendees?: string[];
-    recurrenceRule?: string;
-    parentTaskId?: string;
-    importance?: 'high' | 'normal' | 'low';
-    isReminderOn?: boolean;
-    scheduleType?: ScheduleType;
-}
-
-export interface User {
-    timetableUrl: string;
-    timetableFetchLevel: number;
-    mailReadingSpan: number;
-    id: string;
-    email: string;
-    name: string;
-    XJTLUaccount?: string;
-    XJTLUPassword?: string;
-    passwordHash?: string;
-    JWTtoken?: string;
-    MStoken?: string;
-    MSbinded: boolean;
-    ebridgeBinded: boolean;
-    tasks: Task[];
-    emsClient?: ExchangeClient;
-    conflictBoundaryInclusive?: boolean;
-}
+import { Task, User } from '../index.js';
 
 
 function getCurrentWeekNumber(): number {
@@ -101,7 +65,7 @@ export async function syncUserTimetable(user: User, force: boolean = false): Pro
     const userFetchLevel = user.timetableFetchLevel || 0;
 
     if (!force && envFetchLevel <= userFetchLevel) {
-        logger.info(`Skipping timetable fetch for user ${user.id}: env level (${envFetchLevel}) <= user level (${userFetchLevel})`);
+        logger.debug(`Skipping timetable fetch for user ${user.id}: env level (${envFetchLevel}) <= user level (${userFetchLevel})`);
         return { added: 0, errors: 0 };
     }
 
@@ -179,7 +143,7 @@ export async function syncUserTimetable(user: User, force: boolean = false): Pro
                                         await dbService.addTask(user.id, newTask, !!user.conflictBoundaryInclusive, true);
                                         broadcastTaskChange('created', newTask, user.id);
                                         await dbService.refreshUserTasksIncremental(user, { addedIds: [newTask.id] });
-                                        
+
                                         if (conflicts.length > 0) {
                                             logger.warn(`Added conflicting timetable task ${newTask.id} for user ${user.id} with warning`);
                                             await logUserEvent(user.id, 'taskConflictWarning', `Added conflicting timetable task with warning: ${newTask.name}`, { id: newTask.id, conflicts: conflicts.map(c => c.id) });

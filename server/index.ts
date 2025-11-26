@@ -74,6 +74,13 @@ export interface Task {
     scheduleType?: ScheduleType;
 }
 
+export interface Profile{
+    company: string;
+    school :string;
+    campus: string;
+    schoolYear: string; 
+}
+
 export interface User {
     timetableUrl: string;
     timetableFetchLevel: number; // 时间表获取级别，用于控制重新获取频率
@@ -93,6 +100,7 @@ export interface User {
     emsClient?: ExchangeClient; // 用于操作 Exchange 的客户端
     conflictBoundaryInclusive?: boolean; // 端点相接是否算冲突（true=算）
     isConflictScheduleAllowed?: boolean; // 是否允许冲突的日程存在
+    userProfile?: Profile;
 }
 
 
@@ -282,7 +290,13 @@ app.post('/register', async (req, res) => {
                 completed: false,
                 pushedToMSTodo: false,
                 scheduleType: 'single',
-            }]
+            }],
+            userProfile: {
+                company: '',
+                school: "Xi'an Jiaotong-Liverpool University",
+                campus: 'SIP',
+                schoolYear: 'Year 1'
+            }
         };
 
         const token = signJwt({ sub: id, email });
